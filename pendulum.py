@@ -260,9 +260,9 @@ if __name__=='__main__':
                     rtol=rtol, atol=atol, jac=jac_dae, jac_sparsity=None,
                     method=method, vectorized=False, first_step=1e-3, dense_output=False,
                     mass=mass, bPrint=bPrint)
-    print("DAE of index {} {} in {} time steps, {} fev, {} jev, {} LUdec, {} LU solves".format(
+    print("DAE of index {} {} in {} time steps, {} fev, {} jev, {} LUdec".format(
           chosen_index, 'solved'*sol.success+(1-sol.success)*'failed',
-          sol.t.size, sol.nfev, sol.njev, sol.nlu, sol.solver.nlusove))
+          sol.t.size, sol.nfev, sol.njev, sol.nlu))
     
     # recover the time history of each variable    
     x=sol.y[0,:]; y=sol.y[1,:]; vx=sol.y[2,:]; vy=sol.y[3,:]; lbda=sol.y[4,:]

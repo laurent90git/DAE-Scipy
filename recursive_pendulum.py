@@ -16,13 +16,13 @@
 import numpy as np
 
 
-n_pendulum = 5
+n_pendulum = 100
 n=n_pendulum
 
 g=9.81
 
 ## Initial conditions for each pendulum
-theta_0     = np.array([np.pi/4 for i in range(n)])
+theta_0     = np.array([3*np.pi/4 for i in range(n)])
 # theta_0[-1] = np.pi/2
 # theta_0     = np.array([np.pi/2 for i in range(n)])
 # # theta_0     = np.array([0. for i in range(n)])
@@ -89,11 +89,14 @@ def generateSytem(n,chosen_index=3):
     # to ensure machine accuracy
     if jac_dae is None:
         import scipy.optimize._numdiff
+        import scipy.sparse
+        # sparsity = scipy.sparse.diags(diagonals=[np.ones(n*5-abs(i)) for i in range(-7,7)], offsets=[i for i in range(-7,7)])
+        sparsity = None
         jac_dae = lambda t,x: scipy.optimize._numdiff.approx_derivative(
                                     fun=lambda x: dae_fun(t,x),
                                     x0=x, method='cs',
                                     rel_step=1e-50, f0=None,
-                                    bounds=(-np.inf, np.inf), sparsity=None,
+                                    bounds=(-np.inf, np.inf), sparsity=sparsity,
                                     as_linear_operator=False, args=(),
                                     kwargs={})      
     ## Otherwise, the Radau solver uses its own routine to estimate the Jacobian, however the
@@ -126,8 +129,8 @@ if __name__=='__main__':
     from radauDAE import RadauDAE
     ###### Parameters to play with
     chosen_index = 3 # The index of the DAE formulation
-    tf = 5.0       # final time (one oscillation is ~2s long)
-    rtol=1e-5; atol=rtol # relative and absolute tolerances for time adaptation
+    tf = 50.0       # final time (one oscillation is ~2s long)
+    rtol=1e-3; atol=rtol # relative and absolute tolerances for time adaptation
     bPrint=False # if True, additional printouts from Radau during the computation
     method=RadauDAE
     
