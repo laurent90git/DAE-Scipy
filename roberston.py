@@ -3,22 +3,10 @@
 """
 Created on Mon Nov  2 14:54:33 2020
 
-@author: laurent
-"""
-import numpy as np
-from scipy.sparse import diags
-from scipy.integrate import solve_ivp
-from numpy.testing import (assert_, assert_allclose,
-                           assert_equal, assert_no_warnings, suppress_warnings)
-from radauDAE import RadauDAE
-
-method=RadauDAE
-
-"""
-  The idea is to test the "mass" option with the simple Roberston system
+The idea is to test the "mass" option with the simple Roberston system
 (see [1]). This is a stiff ODE system which reads:
   
-  dy[0]/dt = -0.04*y[0] + 1e4*y[1]*y[2]
+   dy[0]/dt = -0.04*y[0] + 1e4*y[1]*y[2]
    dy[1]/dt =  0.04*y[0] - 1e4*y[1]*y[2] - 3e7*(y[1]**2)
    dy[2]/dt =  3e7*(y[1]**2)
 
@@ -56,9 +44,23 @@ to the one of the original ODE system.
 References:
   [1] Robertson, H.H. The solution of a set of reaction rate equations. 
       In Numerical Analysis: An Introduction;Academic Press: London, UK, 1966
-"""
 
-bPrint=True # if True, Radau prints additional information during the computation
+@author: laurent
+"""
+import numpy as np
+from scipy.sparse import diags
+from scipy.integrate import solve_ivp
+from numpy.testing import (assert_, assert_allclose,
+                           assert_equal, assert_no_warnings, suppress_warnings)
+
+
+## Choice of integration method
+from radauDAE import RadauDAE
+
+method=RadauDAE
+
+
+bPrint=False # if True, Radau prints additional information during the computation
 
 #%% Define the ODE formulation
 mass     = np.array([[1.,0.,0.],[0.,1.,0.],[0.,0.,0.]])
@@ -80,8 +82,8 @@ jac_dae = lambda t,y: np.array([[-0.04, 1e4*y[2], 1e4*y[1]],
 # Integration parameters
 y0 = np.array([1.,0.,0.]) # initial condition
 rtol=1e-7; atol=1e-6 # absolute and relative tolerances for time step adaptation
-# tf = 5e6 # final time
-tf = 1e2 # final time
+tf = 5e6 # final time
+# tf = 1e2 # final time
 # above t=0.2, the Radau solution in the DAE case has more difficulties
 # to converge, potentially because, as h becomes important, the problem with a
 # singular mass matrix is poorly conditioned (actually, this does not seem
@@ -99,15 +101,17 @@ sol_dae = solve_ivp(fun=modelfun_DAE, t_span=(0., tf), y0=y0, max_step=np.inf,
                     method=method, vectorized=False, first_step=1e-8, dense_output=True,
                     mass=mass, bPrint=bPrint)
 
-print("DAE solved in {} time steps, {} fev, {} jev, {} LUdec, {} LU solves".format(
-  sol_dae.t.size, sol_dae.nfev, sol_dae.njev, sol_dae.nlu, sol_dae.solver.nlusove))
-print("ODE solved in {} time steps, {} fev, {} jev, {} LUdec, {} LU solves".format(
-  sol_ode.t.size, sol_ode.nfev, sol_ode.njev, sol_ode.nlu, sol_ode.solver.nlusove))
+# print("DAE solved in {} time steps, {} fev, {} jev, {} LUdec, {} LU solves".format(
+#   sol_dae.t.size, sol_dae.nfev, sol_dae.njev, sol_dae.nlu, sol_dae.solver.nlusove))
+print("DAE solved in {} time steps, {} fev, {} jev, {} LUdec".format(
+  sol_dae.t.size, sol_dae.nfev, sol_dae.njev, sol_dae.nlu))
+print("ODE solved in {} time steps, {} fev, {} jev, {} LUdec".format(
+  sol_ode.t.size, sol_ode.nfev, sol_ode.njev, sol_ode.nlu))
 
 
 #%% Plot the solution and some useful statistics
 import matplotlib.pyplot as plt
-fig, ax = plt.subplots(4,1,sharex=True, dpi=300, figsize=np.array([1.5,3])*5)
+fig, ax = plt.subplots(3,1,sharex=True, dpi=300, figsize=np.array([1.5,3])*5)
 pltfun = ax[0].plot
 # pltfun = ax[0].semilogx
 pltfun(sol_ode.t, sol_ode.y[0,:],     color='tab:green', linestyle='-', linewidth=2, label=None)
@@ -141,25 +145,25 @@ ax[2].legend(frameon=False)
 ax[2].grid()
 ax[2].set_ylabel('number\nof steps')
 
-ax[3].loglog(sol_ode.solver.info['cond']['t'], sol_ode.solver.info['cond']['LU_real'], color='tab:blue', linestyle='-', linewidth=2, label='ODE real')
-ax[3].loglog(sol_dae.solver.info['cond']['t'], sol_dae.solver.info['cond']['LU_real'], color='tab:orange', linestyle='-', linewidth=1, label='DAE real')
-ax[3].loglog(sol_ode.solver.info['cond']['t'], sol_ode.solver.info['cond']['LU_complex'], color='tab:blue', linestyle='--', linewidth=2, label='ODE complex')
-ax[3].loglog(sol_dae.solver.info['cond']['t'], sol_dae.solver.info['cond']['LU_complex'], color='tab:orange', linestyle='--', linewidth=1, label='DAE complex')
-ax[3].legend(frameon=False)
-plt.xlim(1e-10,tf*1.05)
-ax[3].grid()
-ax[3].set_ylabel('condition\nnumbers')
+# ax[3].loglog(sol_ode.solver.info['cond']['t'], sol_ode.solver.info['cond']['LU_real'], color='tab:blue', linestyle='-', linewidth=2, label='ODE real')
+# ax[3].loglog(sol_dae.solver.info['cond']['t'], sol_dae.solver.info['cond']['LU_real'], color='tab:orange', linestyle='-', linewidth=1, label='DAE real')
+# ax[3].loglog(sol_ode.solver.info['cond']['t'], sol_ode.solver.info['cond']['LU_complex'], color='tab:blue', linestyle='--', linewidth=2, label='ODE complex')
+# ax[3].loglog(sol_dae.solver.info['cond']['t'], sol_dae.solver.info['cond']['LU_complex'], color='tab:orange', linestyle='--', linewidth=1, label='DAE complex')
+# ax[3].legend(frameon=False)
+# plt.xlim(1e-10,tf*1.05)
+# ax[3].grid()
+# ax[3].set_ylabel('condition\nnumbers')
 
 ax[-1].set_xlabel('t (s)')
 
-#%% Plot the evolution of all time steps tried by the method
-if bPrint:
-  plt.figure()
-  plt.plot(sol_dae.solver.info['cond']['t'], sol_dae.solver.info['cond']['h'])
-  plt.plot(sol_ode.solver.info['cond']['t'], sol_ode.solver.info['cond']['h'])
-  plt.grid()
-  plt.ylabel('dt (s)')
-  plt.xlabel('t (s)')
+# #%% Plot the evolution of all time steps tried by the method
+# if bPrint:
+#   plt.figure()
+#   plt.plot(sol_dae.solver.info['cond']['t'], sol_dae.solver.info['cond']['h'])
+#   plt.plot(sol_ode.solver.info['cond']['t'], sol_ode.solver.info['cond']['h'])
+#   plt.grid()
+#   plt.ylabel('dt (s)')
+#   plt.xlabel('t (s)')
 
 #%% A posteriori analysis of the condition number of the system's Jacobian
 plt.figure()

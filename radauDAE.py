@@ -107,7 +107,7 @@ def solve_collocation_system(fun, t, y, h, Z0, scale, tol,
     rate = None
     for k in range(NEWTON_MAXITER):
         if BPRINT:
-          print('\t iter {}/{}'.format(k,NEWTON_MAXITER))
+          print('\titer {}/{}'.format(k,NEWTON_MAXITER))
         for i in range(3):
             F[i] = fun(t + ch[i], y + Z[i])
 
@@ -124,8 +124,8 @@ def solve_collocation_system(fun, t, y, h, Z0, scale, tol,
             f_complex = F.T.dot(TI_COMPLEX) - M_complex * mass_matrix.dot( W[1] + 1j * W[2] )
 
         if BPRINT:
-          print('\tresiduals: ||f_real||={:.3e}'.format(norm(f_real)))
-          print('\t           ||f_cplx||={:.3e}'.format(norm(f_complex)))
+          print('\t\tresiduals: ||f_real||={:.3e}'.format(norm(f_real)))
+          print('\t\t           ||f_cplx||={:.3e}'.format(norm(f_complex)))
           
         dW_real = solve_lu(LU_real, f_real)
         dW_complex = solve_lu(LU_complex, f_complex)
@@ -140,13 +140,17 @@ def solve_collocation_system(fun, t, y, h, Z0, scale, tol,
 
         if dW_norm_old is not None:
             rate = dW_norm / dW_norm_old
-            if BPRINT:
-                print('\t\trate={:.3e}'.format(rate))
+                
         if BPRINT and rate is not None:
-          print('\tpredicted convergence would reach ||dW||={:.3E}'.format( rate ** (NEWTON_MAXITER - k) / (1 - rate) * dW_norm ))
+          print('\t\trate={:.3e}'.format(rate))
+          print('\t\testimated true error: ||dW||={:.3E}'.format( rate / (1 - rate) * dW_norm ))
+
         if (rate is not None and (rate >= 1 or
                 rate ** (NEWTON_MAXITER - k) / (1 - rate) * dW_norm > tol)):
             # Newton loop diverges or does not converge fast enough
+            if BPRINT:
+              print('\tfinal loop convergence would reach ||dW||={:.3e}>tol--> Newton failed'.format(
+                rate ** (NEWTON_MAXITER - k) / (1 - rate) * dW_norm))
             break
 
         W += dW
@@ -276,11 +280,16 @@ class RadauDAE(OdeSolver):
         is assumed to be dense.
     vectorized : bool, optional
         Whether `fun` is implemented in a vectorized fashion. Default is False.
-        
     mass : {None, array_like, sparse_matrix}, optional
-           Defined the constant mass matrix of the system, with shape (n,n).
-           It may be singular, thus defining a problem of the differential-
-           algebraic type (DAE), see [1]. The default value is None.
+        Defined the constant mass matrix of the system, with shape (n,n).
+        It may be singular, thus defining a problem of the differential-
+        algebraic type (DAE), see [1]. The default value is None.
+    newton_tol: float, optional
+        Overrides the Newton tolerance. This parameter should be left to None,
+        as it might strongly affect the performance and/or convergence.
+    constant_dt: boolean, optional
+        If True, the algorithm does not adapt the time step and tries to
+        maintain h = max_step.
 
     Attributes
     ----------
@@ -317,7 +326,8 @@ class RadauDAE(OdeSolver):
     """
     def __init__(self, fun, t0, y0, t_bound, max_step=np.inf,
                  rtol=1e-3, atol=1e-6, jac=None, jac_sparsity=None,
-                 vectorized=False, first_step=None, mass=None, bPrint=False, **extraneous):
+                 vectorized=False, first_step=None, mass=None, bPrint=False,
+                 newton_tol=None, constant_dt=False, bPrintProgress=False, **extraneous):
         warn_extraneous(extraneous)
         super(RadauDAE, self).__init__(fun, t0, y0, t_bound, vectorized)
         self.y_old = None
@@ -335,13 +345,19 @@ class RadauDAE(OdeSolver):
         self.h_abs_old = None
         self.error_norm_old = None
 
-        self.newton_tol = max(10 * EPS / rtol, min(0.03, rtol ** 0.5))
+        if newton_tol is None:
+            self.newton_tol = max(10 * EPS / rtol, min(0.03, rtol ** 0.5))
+        else:
+            self.newton_tol = newton_tol
         self.sol = None
+        self.constant_dt = constant_dt
 
         self.jac_factor = None
         self.jac, self.J = self._validate_jac(jac, jac_sparsity)
         
         self.nlusove=0
+        
+        self.bPrintProgress = bPrintProgress
         global BPRINT
         BPRINT=bPrint
         if BPRINT:
@@ -383,9 +399,12 @@ class RadauDAE(OdeSolver):
             else:
                 self.mass_matrix = mass
                 self.index_algebraic_vars = np.where(np.all(self.mass_matrix==0,axis=1))[0]
+            self.nvars_algebraic = self.index_algebraic_vars.size
         else:
             self.mass_matrix = None
             self.index_algebraic_vars = None
+            self.nvars_algebraic = 0
+        
 
         self.current_jac = True
         self.LU_real = None
@@ -451,7 +470,8 @@ class RadauDAE(OdeSolver):
         t = self.t
         y = self.y
         f = self.f
-
+        n = y.size
+        
         max_step = self.max_step
         atol = self.atol
         rtol = self.rtol
@@ -534,7 +554,7 @@ class RadauDAE(OdeSolver):
                 if not converged:
                     if BPRINT:
                         print('no convergence at t={} with dt={}'.format(t,h))
-                    if current_jac:
+                    if current_jac: # we only allow one Jacobian computation per time step
                         if BPRINT:
                             print('  Jac had already been updated')  
                         break
@@ -544,59 +564,83 @@ class RadauDAE(OdeSolver):
                     LU_real = None
                     LU_complex = None
 
+	    ## End of the convergence loop
             if not converged:
                 if BPRINT:
-                   print('   --> dt will be halved')
+                   print('   --> dt will be reduced')
                 h_abs *= 0.5
                 LU_real = None
                 LU_complex = None
                 continue
 
             y_new = y + Z[-1]
-            ZE = Z.T.dot(E) / h
-            if self.mass_matrix is None:
-                error = self.solve_lu(LU_real, f + ZE)
-            else: # see Hairer II, chapter IV.8, page 127
-                error = self.solve_lu(LU_real, f + self.mass_matrix.dot(ZE))
-                if self.index_algebraic_vars is not None:
-                  error[self.index_algebraic_vars] = 0. # ideally error*(h**index) # error[self.index_algebraic_vars]*h #min((h,1/h))
-            scale = atol + np.maximum(np.abs(y), np.abs(y_new)) * rtol
-            error_norm = norm(error / scale)
-            safety = 0.9 * (2 * NEWTON_MAXITER + 1) / (2 * NEWTON_MAXITER
-                                                       + n_iter)
-            if BPRINT:
-              print('\t1st error estimate: {:.3e}'.format(error_norm))
-            # if rejected and error_norm > 1:
-            if error_norm > 1:
-                if BPRINT:
-                  print('\t rejected')
-                if self.mass_matrix is None:
-                    error = self.solve_lu(LU_real, self.fun(t, y + error) + ZE)
-                else:
-                    error = self.solve_lu(LU_real, self.fun(t, y + error) + self.mass_matrix.dot(ZE))
-                    if self.index_algebraic_vars is not None:
-                      error[self.index_algebraic_vars] = 0. # ideally error*(h**index) # error[self.index_algebraic_vars]*h #min((h,1/h))
-                error_norm = norm(error / scale)
-                if BPRINT:
-                  print('\t2nd error estimate: {:.3e}'.format(error_norm))
-            if error_norm > 1:
-                if BPRINT and y_new.size<10:
-                  print('\terror=',error/scale)
-                factor = predict_factor(h_abs, h_abs_old,
-                                        error_norm, error_norm_old)
-                h_abs *= max(MIN_FACTOR, safety * factor)
-                LU_real = None
-                LU_complex = None
-                rejected = True
-            else:
-                if BPRINT:
-                    print('\terror estimate is small enough')
+            
+            
+            if self.constant_dt:
                 step_accepted = True
+                error_norm = 0.
+            else:
+                ZE = Z.T.dot(E) / h
+                if self.mass_matrix is None:
+                    error = self.solve_lu(LU_real, f + ZE)
+                    error_norm = norm(error / scale)
+                else: # see Hairer II, chapter IV.8, page 127
+                    error = self.solve_lu(LU_real, f + self.mass_matrix.dot(ZE))
+                    if self.index_algebraic_vars is not None:
+                        error[self.index_algebraic_vars] = 0. # ideally error*(h**index) 
+                        error_norm = np.linalg.norm( error/scale ) / (n - self.nvars_algebraic)** 0.5
+                        # we exclude the algebraic components, as they would otherwise artificially lower the error norm
+                        # error_norm = norm(error / scale)
+                    else:
+                        error_norm = norm(error / scale)
+    
+                scale = atol + np.maximum(np.abs(y), np.abs(y_new)) * rtol
+                error_norm = norm(error / scale)
+                safety = 0.9 * (2 * NEWTON_MAXITER + 1) / (2 * NEWTON_MAXITER
+                                                           + n_iter)
+                if BPRINT:
+                  print('\t1st error estimate: {:.3e}'.format(error_norm))
+                if rejected and error_norm > 1:
+                # if error_norm > 1:
+                    if BPRINT:
+                      print('\t rejected')
+                    if self.mass_matrix is None:
+                        error = self.solve_lu(LU_real, self.fun(t, y + error) + ZE)
+                        error_norm = norm(error / scale)
+                    else:
+                        error = self.solve_lu(LU_real, self.fun(t, y + error) + self.mass_matrix.dot(ZE))
+                        if self.index_algebraic_vars is not None:
+                            error[self.index_algebraic_vars] = 0. # ideally error*(h**index) 
+                            error_norm = np.linalg.norm( error/scale ) / (n - self.nvars_algebraic)** 0.5
+                            # we exclude the algebraic components, as they would otherwise artificially lower the error norm
+                            # error_norm = norm(error / scale)
+                        else:
+                            error_norm = norm(error / scale)
+                    
+                    if BPRINT:
+                      print('\t2nd error estimate: {:.3e}'.format(error_norm))
+                if error_norm > 1:
+                    if BPRINT and y_new.size<10:
+                      print('\terror=',error/scale)
+                    factor = predict_factor(h_abs, h_abs_old,
+                                            error_norm, error_norm_old)
+                    h_abs *= max(MIN_FACTOR, safety * factor)
+                    LU_real = None
+                    LU_complex = None
+                    rejected = True
+                else:
+                    if BPRINT:
+                        print('\terror estimate is small enough')
+                    step_accepted = True
 
+	## Step is converged and accepted
         recompute_jac = jac is not None and n_iter > 2 and rate > 1e-3
 
-        factor = predict_factor(h_abs, h_abs_old, error_norm, error_norm_old)
-        factor = min(MAX_FACTOR, safety * factor)
+        if self.constant_dt:
+          factor = self.max_step/h_abs # return to the maximum value
+        else:
+          factor = predict_factor(h_abs, h_abs_old, error_norm, error_norm_old)
+          factor = min(MAX_FACTOR, safety * factor)
 
         if not recompute_jac and factor < 1.2:
             factor = 1
@@ -632,6 +676,8 @@ class RadauDAE(OdeSolver):
         self.t_old = t
         self.sol = self._compute_dense_output()
 
+        if self.bPrintProgress:
+          print('t=',t)
         return step_accepted, message
 
     def _compute_dense_output(self):
@@ -658,7 +704,7 @@ class RadauDenseOutput(DenseOutput):
         else:
             p = np.tile(x, (self.order + 1, 1))
             p = np.cumprod(p, axis=0)
-        # Here we don't multiply by h, not a mistake.
+        # Here we don't multiply by h, not a mistake, because we use the dimensionless time x
         y = np.dot(self.Q, p)
         if y.ndim == 2:
             y += self.y_old[:, None]

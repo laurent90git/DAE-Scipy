@@ -81,8 +81,10 @@ sol = solve_ivp(fun=modelfun_DAE, t_span=(0., tf), y0=y0, max_step=np.inf,
 assert_(sol.success, msg='DAE solution failed with solver {method}')
 
 #%% Plot the solution and some useful statistics
-print("DAE solved in {} time steps, {} fev, {} jev, {} LUdec, {} LU solves".format(
-  sol.t.size, sol.nfev, sol.njev, sol.nlu, sol.solver.nlusove))
+# print("DAE solved in {} time steps, {} fev, {} jev, {} LUdec, {} LU solves".format(
+#   sol.t.size, sol.nfev, sol.njev, sol.nlu, sol.solver.nlusove))
+print("DAE solved in {} time steps, {} fev, {} jev, {} LUdec".format(
+  sol.t.size, sol.nfev, sol.njev, sol.nlu))
 
 import matplotlib.pyplot as plt
 fig, ax = plt.subplots(3,1,sharex=True, dpi=300)

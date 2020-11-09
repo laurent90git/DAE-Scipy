@@ -6,9 +6,14 @@ This is done by intorudcing a mass matrix *M* and solving the following equation
 > M dX/dt = f(t,X)
 
 Various examples are given:
+
 - pendulum (index 3, 2, 1 or 0 DAE)
-- transistor amplifier (index 1 DAE with singular mass-matrix)
+
+- transistor amplifier (index-1 DAE with singular mass-matrix)
+
 - Roberston chemical system (stiff DAE of index 1, or stiff ODE formulation)
+
+- "recursive" pendulum (index-3 DAE of size n, n being the number fo serially connected pendulums )
 
 This modification of Radau will hopefully be pushed to Scipy after some further testing :)
 
