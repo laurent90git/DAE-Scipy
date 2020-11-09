@@ -15,6 +15,10 @@ Various examples are given:
 
 - "recursive" pendulum (index-3 DAE of size n, n being the number fo serially connected pendulums )
 
+
+![Hanging rope index-3 DAE animated](https://raw.githubusercontent.com/laurent90git/DAE-Scipy/main/docs/hanging_rope.gif "Hanging rope index-3 DAE")
+
+
 This modification of Radau will hopefully be pushed to Scipy after some further testing :)
 
 Further DAE integrators with time adaptation (ESDIRKs) will be implemented based on Scipy's solver class. A test case with a DAE from a discretised PDE will also be added.
