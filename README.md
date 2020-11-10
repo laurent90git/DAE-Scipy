@@ -13,7 +13,7 @@ Various examples are given:
 
 - Roberston chemical system (stiff DAE of index 1, or stiff ODE formulation)
 
-- "recursive" pendulum (index-3 DAE of size n, n being the number fo serially connected pendulums )
+- "recursive" pendulum (index-3 DAE of size n, n being the number of serially connected pendulums)
 
 
 ![Hanging rope index-3 DAE animated](https://raw.githubusercontent.com/laurent90git/DAE-Scipy/main/docs/hanging_rope.gif "Hanging rope index-3 DAE")
