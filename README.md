@@ -2,7 +2,7 @@
 
 This repository is based on Scipy's integrate module. The Radau method implemented in Scipy for solving ordinary differential equations (ODEs) is adapted to allow for the solution of differential-algebraic equations (DAEs) up to index 3.
 
-This is done by intorudcing a mass matrix *M* and solving the following equation:
+This is done by introducing a mass matrix *M* and solving the following equation:
 > M dX/dt = f(t,X)
 
 Various examples are given:
