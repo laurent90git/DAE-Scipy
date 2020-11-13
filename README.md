@@ -15,9 +15,12 @@ Various examples are given:
 
 - "recursive" pendulum (index-3 DAE of size n, n being the number of serially connected pendulums)
 
+The latter may be used to simulate simple ropes, for example:
 
 ![Hanging rope index-3 DAE animated](https://raw.githubusercontent.com/laurent90git/DAE-Scipy/main/docs/hanging_rope.gif "Hanging rope index-3 DAE")
 
+
+or even compute the !["free falling chain" problem](https://www.youtube.com/watch?v=VESQ7IXPlQw).
 
 This modification of Radau will hopefully be pushed to Scipy after some further testing :)
 
