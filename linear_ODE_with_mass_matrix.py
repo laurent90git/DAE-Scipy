@@ -5,16 +5,16 @@ Created on Mon Nov  2 14:54:33 2020
 
 The idea is to test the "mass" option with a simple vector ODE
 on the array y=(y0,y1,y2,...,yn), which reads:
-  
+
   d(y[k])/dt = eigvals[k]*y, with eigvals[k] the k-th eigenvalue of the system
-  
+
   <=> dy/dt = diag(eigvals)*y
-  
+
 This simple ODE (no mass matrix) can also be reformulated as a:
-  
+
   M*dy/dt = y,  with M=diag(1/eigvals).
-  
-This allows to verify that the mass matrix implementation is coherent. 
+
+This allows to verify that the mass matrix implementation is coherent.
 
 @author: laurent
 """
@@ -42,10 +42,10 @@ y0 = np.ones((n,))
 true_solution = y0*np.exp(eigvals*tf) # theoretical solution
 sol_with_mass = solve_ivp(fun=modelfun_with_mass, t_span=(0., tf), y0=y0, max_step=np.inf,
                 rtol=rtol, atol=atol, jac=None, jac_sparsity=None, method=method,
-                vectorized=False, first_step=None, mass=mass)
+                vectorized=False, first_step=None, mass_matrix=mass)
 sol_without_mass = solve_ivp(fun=modelfun_without_mass, t_span=(0., tf), y0=y0, max_step=np.inf,
                 rtol=rtol, atol=atol, jac=None, jac_sparsity=None, method=method,
-                vectorized=False, first_step=None, mass=None)
+                vectorized=False, first_step=None, mass_matrix=None)
 
 
 

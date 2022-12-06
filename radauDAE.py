@@ -41,132 +41,6 @@ P = np.array([
     [1/3, -8/3, 10/3]])
 
 
-NEWTON_MAXITER = 6 #15#6  # Maximum number of Newton iterations.
-MIN_FACTOR = 0.2  # Minimum allowed decrease in a step size.
-MAX_FACTOR = 10  # Maximum allowed increase in a step size.
-
-
-def solve_collocation_system(fun, t, y, h, Z0, scale, tol,
-                             LU_real, LU_complex, solve_lu, mass_matrix=None):
-    """Solve the collocation system.
-
-    Parameters
-    ----------
-    fun : callable
-        Right-hand side of the system.
-    t : float
-        Current time.
-    y : ndarray, shape (n,)
-        Current state.
-    h : float
-        Step to try.
-    Z0 : ndarray, shape (3, n)
-        Initial guess for the solution. It determines new values of `y` at
-        ``t + h * C`` as ``y + Z0``, where ``C`` is the Radau method constants.
-    scale : float
-        Problem tolerance scale, i.e. ``rtol * abs(y) + atol``.
-    tol : float
-        Tolerance to which solve the system. This value is compared with
-        the normalized by `scale` error.
-    LU_real, LU_complex
-        LU decompositions of the system Jacobians.
-    solve_lu : callable
-        Callable which solves a linear system given a LU decomposition. The
-        signature is ``solve_lu(LU, b)``.
-    mass_matrix : {None, array_like, sparse_matrix}, optional
-           Defined the constant mass matrix of the system, with shape (n,n).
-           It may be singular, thus defining a problem of the differential-
-           algebraic type (DAE). The default value is None (equivalent to
-           an identity mass matrix).
-
-    Returns
-    -------
-    converged : bool
-        Whether iterations converged.
-    n_iter : int
-        Number of completed iterations.
-    Z : ndarray, shape (3, n)
-        Found solution.
-    rate : float
-        The rate of convergence.
-    """
-    # raise Exception('custom radau')
-    n = y.shape[0]
-    M_real = MU_REAL / h
-    M_complex = MU_COMPLEX / h
-
-    W = TI.dot(Z0)
-    Z = Z0
-
-    F = np.empty((3, n))
-    ch = h * C
-
-    dW_norm_old = None
-    dW = np.empty_like(W)
-    converged = False
-    rate = None
-    for k in range(NEWTON_MAXITER):
-        if BPRINT:
-          print('\titer {}/{}'.format(k,NEWTON_MAXITER))
-        for i in range(3):
-            F[i] = fun(t + ch[i], y + Z[i])
-
-        if not np.all(np.isfinite(F)):
-            if BPRINT:
-              print('\t\tF contains non real numbers...')
-            break
-
-        if mass_matrix is None:
-            f_real = F.T.dot(TI_REAL) - M_real * W[0]
-            f_complex = F.T.dot(TI_COMPLEX) - M_complex * (W[1] + 1j * W[2])
-        else:
-            f_real = F.T.dot(TI_REAL) - M_real * mass_matrix.dot( W[0] )
-            f_complex = F.T.dot(TI_COMPLEX) - M_complex * mass_matrix.dot( W[1] + 1j * W[2] )
-
-        if BPRINT:
-          print('\t\tresiduals: ||f_real||={:.3e}'.format(norm(f_real)))
-          print('\t\t           ||f_cplx||={:.3e}'.format(norm(f_complex)))
-          
-        dW_real = solve_lu(LU_real, f_real)
-        dW_complex = solve_lu(LU_complex, f_complex)
-
-        dW[0] = dW_real
-        dW[1] = dW_complex.real
-        dW[2] = dW_complex.imag
-
-        dW_norm = norm(dW / scale)
-        if BPRINT:
-          print('\t\tdW_norm={:.3e}'.format(dW_norm))
-
-        if dW_norm_old is not None:
-            rate = dW_norm / dW_norm_old
-                
-        if BPRINT and rate is not None:
-          print('\t\trate={:.3e}'.format(rate))
-          print('\t\testimated true error: ||dW||={:.3E}'.format( rate / (1 - rate) * dW_norm ))
-
-        if (rate is not None and (rate >= 1 or
-                rate ** (NEWTON_MAXITER - k) / (1 - rate) * dW_norm > tol)):
-            # Newton loop diverges or does not converge fast enough
-            if BPRINT:
-              print('\tfinal loop convergence would reach ||dW||={:.3e}>tol--> Newton failed'.format(
-                rate ** (NEWTON_MAXITER - k) / (1 - rate) * dW_norm))
-            break
-
-        W += dW
-        Z = T.dot(W)
-
-        if (dW_norm == 0 or
-                rate is not None and rate / (1 - rate) * dW_norm < tol):
-            if BPRINT:
-              print('\t\tconverged')
-            converged = True
-            break
-
-        dW_norm_old = dW_norm
-
-    return converged, k + 1, Z, rate
-
 
 def predict_factor(h_abs, h_abs_old, error_norm, error_norm_old):
     """Predict by which factor to increase/decrease the step size.
@@ -202,8 +76,10 @@ def predict_factor(h_abs, h_abs_old, error_norm, error_norm_old):
     else:
         multiplier = h_abs / h_abs_old * (error_norm_old / error_norm) ** 0.25
         if BPRINT:
-          print('error_norm_old={:.3e}, error_norm={:.3e}'.format(error_norm_old,error_norm))
-          print('--> multiplier = {:.3e}'.format(multiplier))
+          # print('error_norm_old={:.2e}, error_norm={:.2e}'.format(error_norm_old,error_norm))
+          print('\terr_np1 / err_n = {:.2e}'.format(error_norm / error_norm_old))
+          print('\th_np1   / h_n   = {:.2e}'.format(h_abs / h_abs_old))
+          print('\t--> step controller multiplier = {:.2e}'.format(multiplier))
 
     with np.errstate(divide='ignore'):
         factor = min(1, multiplier) * error_norm ** -0.25
@@ -246,10 +122,14 @@ class RadauDAE(OdeSolver):
     rtol, atol : float and array_like, optional
         Relative and absolute tolerances. The solver keeps the local error
         estimates less than ``atol + rtol * abs(y)``. Here `rtol` controls a
-        relative accuracy (number of correct digits). But if a component of `y`
-        is approximately below `atol`, the error only needs to fall within
-        the same `atol` threshold, and the number of correct digits is not
-        guaranteed. If components of y have different scales, it might be
+        relative accuracy (number of correct digits), while `atol` controls
+        absolute accuracy (number of correct decimal places). To achieve the
+        desired `rtol`, set `atol` to be smaller than the smallest value that
+        can be expected from ``rtol * abs(y)`` so that `rtol` dominates the
+        allowable error. If `atol` is larger than ``rtol * abs(y)`` the
+        number of correct digits is not guaranteed. Conversely, to achieve the
+        desired `atol` set `rtol` such that ``rtol * abs(y)`` is always smaller
+        than `atol`. If components of y have different scales, it might be
         beneficial to set different `atol` values for different components by
         passing array_like with shape (n,) for `atol`. Default values are
         1e-3 for `rtol` and 1e-6 for `atol`.
@@ -289,7 +169,8 @@ class RadauDAE(OdeSolver):
         as it might strongly affect the performance and/or convergence.
     constant_dt: boolean, optional
         If True, the algorithm does not adapt the time step and tries to
-        maintain h = max_step.
+        maintain h = max_step. Must be used in conjunction to a properly set value
+        of the `newton_tol` parameter (e.g. 1e-8 as a rule of thumb).
 
     Attributes
     ----------
@@ -326,10 +207,19 @@ class RadauDAE(OdeSolver):
     """
     def __init__(self, fun, t0, y0, t_bound, max_step=np.inf,
                  rtol=1e-3, atol=1e-6, jac=None, jac_sparsity=None,
-                 vectorized=False, first_step=None, mass=None, bPrint=False,
-                 newton_tol=None, constant_dt=False, bPrintProgress=False, **extraneous):
+                 vectorized=False, first_step=None, mass_matrix=None, bPrint=False,
+                 newton_tol=None, constant_dt=False, bPrintProgress=False,
+                 max_newton_ite=6, min_factor=0.2, max_factor=10, max_bad_ite=None,
+                 var_index=None, scale_residuals=False, scale_newton_norm=False,
+                 scale_error=True, zero_algebraic_error=False, bDebug=False,
+                 **extraneous):
+
+        self.NEWTON_MAXITER = max_newton_ite # Maximum number of Newton iterations
+        self.MIN_FACTOR = min_factor # Minimum allowed decrease in a step size
+        self.MAX_FACTOR = max_factor # Maximum allowed increase in a step size
+
         warn_extraneous(extraneous)
-        super(RadauDAE, self).__init__(fun, t0, y0, t_bound, vectorized)
+        super().__init__(fun, t0, y0, t_bound, vectorized)
         self.y_old = None
         self.max_step = validate_max_step(max_step)
         self.rtol, self.atol = validate_tol(rtol, atol, self.n)
@@ -337,9 +227,12 @@ class RadauDAE(OdeSolver):
         # Select initial step assuming the same order which is used to control
         # the error.
         if first_step is None:
-            self.h_abs = select_initial_step(
-                self.fun, self.t, self.y, self.f, self.direction,
-                3, self.rtol, self.atol)
+            if mass_matrix is None:
+                self.h_abs = select_initial_step(
+                    self.fun, self.t, self.y, self.f, self.direction,
+                    3, self.rtol, self.atol)
+            else: # as in [1], default to 1e-6
+                self.h_abs = self.direction * min(1e-6, abs(self.t_bound[1]-self.t_bound[0]))
         else:
             self.h_abs = validate_first_step(first_step, t0, t_bound)
         self.h_abs_old = None
@@ -354,19 +247,21 @@ class RadauDAE(OdeSolver):
 
         self.jac_factor = None
         self.jac, self.J = self._validate_jac(jac, jac_sparsity)
-        
+
         self.nlusove=0
-        
+
         self.bPrintProgress = bPrintProgress
+        self.bDebug = bDebug
         global BPRINT
         BPRINT=bPrint
+
         if BPRINT:
           zzzjac = self.jac
           def debugJacprint(t,y,f):
             print('\tupdating jacobian')
             return zzzjac(t,y,f)
           self.jac = debugJacprint
-          
+
         if issparse(self.J):
             def lu(A):
                 self.nlu += 1
@@ -391,27 +286,65 @@ class RadauDAE(OdeSolver):
         self.lu = lu
         self.solve_lu = solve_lu
         self.I = I
-        
-        if not (mass is None):
-            if issparse(mass):
-                self.mass_matrix = csc_matrix(mass)
-                self.index_algebraic_vars = np.where(np.all(self.mass_matrix.toarray()==0,axis=1))[0] # TODO: avoid the toarray()
-            else:
-                self.mass_matrix = mass
-                self.index_algebraic_vars = np.where(np.all(self.mass_matrix==0,axis=1))[0]
-            self.nvars_algebraic = self.index_algebraic_vars.size
+
+        # DAE-specific treatment
+        self.scale_residuals = scale_residuals
+        self.scale_error = scale_error
+        self.scale_newton_norm = scale_newton_norm
+        self.zero_algebraic_error = zero_algebraic_error
+        if self.scale_residuals:
+            self.hscale = None # will be dynamically computed
         else:
-            self.mass_matrix = None
-            self.index_algebraic_vars = None
-            self.nvars_algebraic = 0
-        
+            self.hscale = self.I
+
+        self.mass_matrix = self._validate_mass_matrix(mass_matrix)
+        if var_index is None: # vector of the algebraic index of each variable
+            self.var_index = np.zeros((y0.size,)) # assume all differential
+        else:
+            assert isinstance(var_index, np.ndarray), '`var_index` must be an array'
+            assert var_index.ndim == 1
+            assert var_index.size == y0.size
+            self.var_index = var_index
+
+        self.var_exp = self.var_index - 1
+        self.var_exp[ self.var_exp < 0 ] = 0 # for differential components
+
+        if not ( max_bad_ite is None ):
+            self.NMAX_BAD = max_bad_ite # Maximum number of bad iterations
+        else:
+            if np.any(self.var_index>1):
+                self.NMAX_BAD = 1
+            else:
+                self.NMAX_BAD = 0
+
+        self.index_algebraic_vars = np.where( self.var_index != 0 )[0] #self.var_index != 0
+        self.nvars_algebraic = self.index_algebraic_vars.size
+
 
         self.current_jac = True
         self.LU_real = None
         self.LU_complex = None
         self.Z = None
-        
-        self.info = {'cond':{'LU_real':[], 'LU_complex':[], 't':[], 'h':[]}}
+
+        if self.bDebug:
+            self.info = {'cond':{'LU_real':[], 'LU_complex':[], 't':[], 'h':[]}}
+
+    def _validate_mass_matrix(self, mass_matrix):
+        if mass_matrix is None:
+            M = self.I
+        elif callable(mass_matrix):
+            raise ValueError("`mass_matrix` should be a constant matrix, but is"
+                             " callable")
+        else:
+            if issparse(mass_matrix):
+                M = csc_matrix(mass_matrix)
+            else:
+                M = np.asarray(mass_matrix, dtype=float)
+            if M.shape != (self.n, self.n):
+                raise ValueError("`mass_matrix` is expected to have shape {}, "
+                                 "but actually has {}."
+                                 .format((self.n, self.n), M.shape))
+        return M
 
     def _validate_jac(self, jac, sparsity):
         t0 = self.t
@@ -471,7 +404,7 @@ class RadauDAE(OdeSolver):
         y = self.y
         f = self.f
         n = y.size
-        
+
         max_step = self.max_step
         atol = self.atol
         rtol = self.rtol
@@ -496,8 +429,6 @@ class RadauDAE(OdeSolver):
 
         current_jac = self.current_jac
         jac = self.jac
-        
-        
 
         rejected = False
         step_accepted = False
@@ -511,52 +442,57 @@ class RadauDAE(OdeSolver):
 
             if self.direction * (t_new - self.t_bound) > 0:
                 t_new = self.t_bound
-                h = t_new - t # may introduce numerical rounding errors
+
+            h = t_new - t # may introduce numerical rounding errors
             h_abs = np.abs(h)
 
+
+            # Z0 = np.zeros((3, y.shape[0]))
             if self.sol is None:
                 Z0 = np.zeros((3, y.shape[0]))
             else:
                 Z0 = self.sol(t + h * C).T - y
 
-            scale = atol + np.abs(y) * rtol
+            newton_scale = atol + np.abs(y) * rtol
+            if self.scale_newton_norm:
+                newton_scale = newton_scale / (h**self.var_exp) # scale for algebraic variables in the Newton increment norm
 
             converged = False
             while not converged:
                 if LU_real is None or LU_complex is None:
-                    if self.mass_matrix is None:
-                        LU_real = self.lu(MU_REAL / h * self.I - J)
-                        LU_complex = self.lu(MU_COMPLEX / h * self.I - J)
-                    else:
-                      try:
-                        LU_real = self.lu(MU_REAL / h * self.mass_matrix - J)
-                        LU_complex = self.lu(MU_COMPLEX / h * self.mass_matrix - J)
-                      except ValueError as e:
-                        # import pdb; pdb.set_trace()
-                        return False, 'LU decomposition failed ({})'.format(e)
+                  if self.scale_residuals:
+                    self.hscale = np.diag(h**(-self.var_index))
+                    # self.hscale = np.diag(h**(-np.minimum(1,self.var_index))) # only by h or 1
+                  try:
+                      LU_real    = self.lu( self.hscale @ (MU_REAL    / h * self.mass_matrix - J) )
+                      LU_complex = self.lu( self.hscale @ (MU_COMPLEX / h * self.mass_matrix - J) )
+                  except ValueError as e:
+                    # import pdb; pdb.set_trace()
+                    return False, 'LU decomposition failed ({})'.format(e)
                 if BPRINT:
                   print('solving system at t={} with dt={}'.format(t,h))
-                  U_matrix = np.triu(LU_real[0],k=0)
-                  L_matrix = np.tril(LU_real[0],k=-1)+self.I
-                  self.info['cond']['LU_real'].append(np.linalg.cond(U_matrix*L_matrix))
-                  U_matrix = np.triu(LU_complex[0],k=0)
-                  L_matrix = np.tril(LU_complex[0],k=-1)+self.I
-                  self.info['cond']['LU_complex'].append(np.linalg.cond(U_matrix*L_matrix))
-                  self.info['cond']['t'].append(t)
-                  self.info['cond']['h'].append(h)
-                  print('\tcond(LU_real)    = {:.3e}'.format( self.info['cond']['LU_real'][-1] ))
-                  print('\tcond(LU_complex) = {:.3e}'.format( self.info['cond']['LU_complex'][-1]  ))
-                  
-                converged, n_iter, Z, rate = solve_collocation_system(
-                    self.fun, t, y, h, Z0, scale, self.newton_tol,
-                    LU_real, LU_complex, self.solve_lu, self.mass_matrix)
+                  if self.bDebug:
+                      U_matrix = np.triu(LU_real[0],k=0)
+                      L_matrix = np.tril(LU_real[0],k=-1)+self.I
+                      self.info['cond']['LU_real'].append(np.linalg.cond(U_matrix*L_matrix))
+                      U_matrix = np.triu(LU_complex[0],k=0)
+                      L_matrix = np.tril(LU_complex[0],k=-1)+self.I
+                      self.info['cond']['LU_complex'].append(np.linalg.cond(U_matrix*L_matrix))
+                      self.info['cond']['t'].append(t)
+                      self.info['cond']['h'].append(h)
+                      print('\tcond(LU_real)    = {:.3e}'.format( self.info['cond']['LU_real'][-1] ))
+                      print('\tcond(LU_complex) = {:.3e}'.format( self.info['cond']['LU_complex'][-1]  ))
+
+                converged, n_iter, Z, f_subs, rate = self.solve_collocation_system(
+                    t, y, h, Z0, newton_scale, self.newton_tol,
+                    LU_real, LU_complex, self.hscale)
 
                 if not converged:
                     if BPRINT:
                         print('no convergence at t={} with dt={}'.format(t,h))
                     if current_jac: # we only allow one Jacobian computation per time step
                         if BPRINT:
-                            print('  Jac had already been updated')  
+                            print('  Jacobian had already been updated')
                         break
 
                     J = self.jac(t, y, f)
@@ -574,57 +510,67 @@ class RadauDAE(OdeSolver):
                 continue
 
             y_new = y + Z[-1]
-            
-            
+            self.t_substeps = t + h * C
+            self.y_substeps = [y + Z[i] for i in range(len(Z))]
+            self.f_substeps = f_subs
+
             if self.constant_dt:
                 step_accepted = True
                 error_norm = 0.
             else:
                 ZE = Z.T.dot(E) / h
-                if self.mass_matrix is None:
-                    error = self.solve_lu(LU_real, f + ZE)
-                    error_norm = norm(error / scale)
-                else: # see Hairer II, chapter IV.8, page 127
-                    error = self.solve_lu(LU_real, f + self.mass_matrix.dot(ZE))
-                    if self.index_algebraic_vars is not None:
-                        error[self.index_algebraic_vars] = 0. # ideally error*(h**index) 
-                        error_norm = np.linalg.norm( error/scale ) / (n - self.nvars_algebraic)** 0.5
-                        # we exclude the algebraic components, as they would otherwise artificially lower the error norm
-                        # error_norm = norm(error / scale)
-                    else:
-                        error_norm = norm(error / scale)
-    
-                scale = atol + np.maximum(np.abs(y), np.abs(y_new)) * rtol
-                error_norm = norm(error / scale)
-                safety = 0.9 * (2 * NEWTON_MAXITER + 1) / (2 * NEWTON_MAXITER
+                error = self.solve_lu(LU_real, f + ZE)
+                err_scale = atol + np.maximum(np.abs(y), np.abs(y_new)) * rtol
+                if self.scale_error:
+                    err_scale = err_scale / (h**self.var_exp) # scale for algebraic variables
+
+                # see [1], chapter IV.8, page 127
+                error = self.solve_lu(LU_real, f + self.mass_matrix.dot(ZE))
+                # if self.index_algebraic_vars is not None:
+                #     # correct for the overestimation of the error on
+                #     # algebraic variables, ideally multiply their errors by
+                #     # (h ** index)
+                #     error[self.index_algebraic_vars] = 0.
+                #     error_norm = np.linalg.norm(error / err_scale) / (n - self.nvars_algebraic) ** 0.5
+                #     # we exclude the algebraic components, otherwise
+                #     # they artificially lower the error norm
+                # else:
+                #     error_norm = norm(error / err_scale)
+                if self.zero_algebraic_error:
+                    error[ self.index_algebraic_vars ] = 0.
+                    error_norm = np.linalg.norm(error / err_scale) / (n - self.nvars_algebraic) ** 0.5
+                else:
+                    error_norm = norm(error / err_scale)
+
+                safety = 0.9 * (2 * self.NEWTON_MAXITER + 1) / (2 * self.NEWTON_MAXITER
                                                            + n_iter)
                 if BPRINT:
                   print('\t1st error estimate: {:.3e}'.format(error_norm))
-                if rejected and error_norm > 1:
-                # if error_norm > 1:
+                if rejected and error_norm > 1: # try with stabilised error estimate
                     if BPRINT:
                       print('\t rejected')
-                    if self.mass_matrix is None:
-                        error = self.solve_lu(LU_real, self.fun(t, y + error) + ZE)
-                        error_norm = norm(error / scale)
+                    error = self.solve_lu(LU_real, self.fun(t, y + error) + self.mass_matrix.dot(ZE))
+                    # if self.index_algebraic_vars is not None:
+                    #     error[self.index_algebraic_vars] = 0. # ideally error*(h**index)
+                    #     error_norm = np.linalg.norm( error/err_scale ) / (n - self.nvars_algebraic)** 0.5
+                    #     # we exclude the algebraic components, as they would otherwise artificially lower the error norm
+                    #     # error_norm = norm(error / err_scale)
+                    # else:
+                    #     error_norm = norm(error / err_scale)
+                    if self.zero_algebraic_error:
+                        error[ self.index_algebraic_vars ] = 0.
+                        error_norm = np.linalg.norm(error / err_scale) / (n - self.nvars_algebraic) ** 0.5
                     else:
-                        error = self.solve_lu(LU_real, self.fun(t, y + error) + self.mass_matrix.dot(ZE))
-                        if self.index_algebraic_vars is not None:
-                            error[self.index_algebraic_vars] = 0. # ideally error*(h**index) 
-                            error_norm = np.linalg.norm( error/scale ) / (n - self.nvars_algebraic)** 0.5
-                            # we exclude the algebraic components, as they would otherwise artificially lower the error norm
-                            # error_norm = norm(error / scale)
-                        else:
-                            error_norm = norm(error / scale)
-                    
+                        error_norm = norm(error / err_scale)
+
                     if BPRINT:
                       print('\t2nd error estimate: {:.3e}'.format(error_norm))
                 if error_norm > 1:
                     if BPRINT and y_new.size<10:
-                      print('\terror=',error/scale)
+                      print('\terror (scaled)=',error/err_scale)
                     factor = predict_factor(h_abs, h_abs_old,
                                             error_norm, error_norm_old)
-                    h_abs *= max(MIN_FACTOR, safety * factor)
+                    h_abs *= max(self.MIN_FACTOR, safety * factor)
                     LU_real = None
                     LU_complex = None
                     rejected = True
@@ -640,7 +586,7 @@ class RadauDAE(OdeSolver):
           factor = self.max_step/h_abs # return to the maximum value
         else:
           factor = predict_factor(h_abs, h_abs_old, error_norm, error_norm_old)
-          factor = min(MAX_FACTOR, safety * factor)
+          factor = min(self.MAX_FACTOR, safety * factor)
 
         if not recompute_jac and factor < 1.2:
             factor = 1
@@ -666,6 +612,7 @@ class RadauDAE(OdeSolver):
         self.y = y_new
         self.f = f_new
 
+
         self.Z = Z
 
         self.LU_real = LU_real
@@ -680,6 +627,148 @@ class RadauDAE(OdeSolver):
           print('t=',t)
         return step_accepted, message
 
+    def solve_collocation_system(self, t, y, h, Z0, norm_scale, tol,
+                                 LU_real, LU_complex, residual_scale):
+        """Solve the collocation system.
+
+        Parameters
+        ----------
+        t : float
+            Current time.
+        y : ndarray, shape (n,)
+            Current state.
+        h : float
+            Step to try.
+        Z0 : ndarray, shape (3, n)
+            Initial guess for the solution. It determines new values of `y` at
+            ``t + h * C`` as ``y + Z0``, where ``C`` is the Radau method constants.
+        norm_scale : ndarray, shape (n)
+            Problem tolerance scale, i.e. ``rtol * abs(y) + atol``.
+        tol : float
+            Tolerance to which solve the system. This value is compared with
+            the normalized by `scale` error.
+        LU_real, LU_complex
+            LU decompositions of the system Jacobians.
+
+        Returns
+        -------
+        converged : bool
+            Whether iterations converged.
+        n_iter : int
+            Number of completed iterations.
+        Z : ndarray, shape (3, n)
+            Found solution.
+        rate : float
+            The rate of convergence.
+        """
+        n = y.shape[0]
+        M_real = MU_REAL / h
+        M_complex = MU_COMPLEX / h
+
+        W = TI.dot(Z0) # state vector at each quadrature point (with complex transformation)
+        Z = Z0 # state vector at each quadrature point
+
+        F = np.empty((3, n))  # RHS evaluated at the quadrature points
+        ch = h * C # quadrature time points
+
+        dW_norm_old = None
+        dW = np.empty_like(W)
+        converged = False
+        rate = None
+        consecutive_bad_iterations = 0
+
+        for k in range(self.NEWTON_MAXITER):
+            if BPRINT:
+              print('\titer {}/{}'.format(k,self.NEWTON_MAXITER))
+            for i in range(3):
+                F[i] = self.fun(t + ch[i], y + Z[i])
+
+            if not np.all(np.isfinite(F)):
+                if BPRINT:
+                  print('\t\tF contains non real numbers...')
+                break
+
+            # compute residuals
+            f_real    = F.T.dot(TI_REAL)    - M_real    * self.mass_matrix.dot( W[0] )
+            f_complex = F.T.dot(TI_COMPLEX) - M_complex * self.mass_matrix.dot( W[1] + 1j * W[2] )
+            if BPRINT:
+              print('\t\tresiduals (unscaled):  ||Re(f)||={:.2e}  ||Im(f)||={:.2e}'.format(norm(f_real), norm(f_complex)))
+
+            # scale residuals
+            f_real = residual_scale @ f_real
+            f_complex = residual_scale @ f_complex
+            if BPRINT:
+              print('\t\tresiduals   (scaled):  ||Re(f)||={:.2e}  ||Im(f)||={:.2e}'.format(norm(f_real), norm(f_complex)))
+
+            # compute Newton increment
+            dW_real    = self.solve_lu(LU_real,    f_real)
+            dW_complex = self.solve_lu(LU_complex, f_complex)
+
+            dW[0] = dW_real
+            dW[1] = dW_complex.real
+            dW[2] = dW_complex.imag
+
+            dW_norm = norm(dW / norm_scale)
+            if BPRINT:
+              print('\t\tstep norm  ||dW||={:.2e} (scaled), {:.2e} (unscaled)'.format(dW_norm, norm(dW)))
+
+            W += dW
+            Z = T.dot(W)
+
+            if dW_norm_old is not None:
+                rate = dW_norm / dW_norm_old
+                dW_true = rate / (1 - rate) * dW_norm # estimated true error
+                dW_true_max_ite = rate ** (self.NEWTON_MAXITER - k) / (1 - rate) * dW_norm # estimated true error after max number of iterations
+                if BPRINT:
+                  print('\t\trate={:.3e}'.format(rate))
+
+            if dW_norm < tol:
+                if BPRINT:
+                    print('\t\tstep norm ||dW||={:.2e} < tol={:.2e}'.format(dW_norm, tol))
+                converged = True
+                break
+
+            if rate is not None:
+                if BPRINT:
+                    print('\t\testimated true error: ||dW*||={:.3E}'.format( dW_true ))
+                    print('\t\testimated true error after max iterations: ||dW**||={:.3E}'.format( dW_true_max_ite ))
+
+                if rate >= 1: # Newton loop diverges
+                    if BPRINT:
+                        print('\t\tNewton loop diverges')
+                    if rate<100:
+                        if consecutive_bad_iterations<self.NMAX_BAD:
+                            # we accept a few number of bad iterations, which may be necessary
+                            if BPRINT:
+                                print('\t\tbad iteration (rate>1)')
+                            consecutive_bad_iterations+=1
+                            continue
+                    break
+                if dW_true < tol:
+                    if BPRINT:
+                        print('\t\testimated true error ||dW*||={:.2e} < tol={:.2e}'.format(dW_true, tol))
+                    converged = True
+                    break
+                if dW_true_max_ite > tol: # Newton will not converge in the allowed number of iterations
+                    if BPRINT:
+                      print('\t\t||dW**||={:.2e} > tol={:.2e}'.format(dW_true_max_ite, tol))
+                    if consecutive_bad_iterations<self.NMAX_BAD:
+                        consecutive_bad_iterations+=1
+                        if BPRINT:
+                            print('\t\t/!\ bad iteration (||dW**|| too large)')
+                        continue
+                    break
+
+            dW_norm_old = dW_norm
+
+        if BPRINT:
+            if converged:
+                print('\t\tstep converged')
+            else:
+                print('\t\tstep failed')
+
+        return converged, k + 1, Z, F, rate
+
     def _compute_dense_output(self):
         Q = np.dot(self.Z.T, P)
         return RadauDenseOutput(self.t_old, self.t, self.y_old, Q)
@@ -690,7 +779,7 @@ class RadauDAE(OdeSolver):
 
 class RadauDenseOutput(DenseOutput):
     def __init__(self, t_old, t, y_old, Q):
-        super(RadauDenseOutput, self).__init__(t_old, t)
+        super().__init__(t_old, t)
         self.h = t - t_old
         self.Q = Q
         self.order = Q.shape[1] - 1
@@ -712,4 +801,198 @@ class RadauDenseOutput(DenseOutput):
             y += self.y_old
 
         return y
-      
+
+
+
+
+def solve_ivp_custom(fun, t_span, y0, method=RadauDAE, t_eval=None, dense_output=False,
+              events=None, vectorized=False, args=None, return_substeps=False,
+              **options):
+    """Solve an initial value problem for a system of ODEs.
+    Custom version, useful for substep export
+    """
+    from scipy.integrate._ivp.ivp import prepare_events, find_active_events, handle_events
+    from scipy.integrate._ivp.ivp import inspect, METHODS, MESSAGES
+    from scipy.integrate._ivp.ivp import OdeSolver, OdeSolution, OdeResult
+    if method not in METHODS and not (
+            inspect.isclass(method) and issubclass(method, OdeSolver)):
+        raise ValueError("`method` must be one of {} or OdeSolver class."
+                         .format(METHODS))
+
+    t0, tf = float(t_span[0]), float(t_span[1])
+
+    if args is not None:
+        # Wrap the user's fun (and jac, if given) in lambdas to hide the
+        # additional parameters.  Pass in the original fun as a keyword
+        # argument to keep it in the scope of the lambda.
+        fun = lambda t, x, fun=fun: fun(t, x, *args)
+        jac = options.get('jac')
+        if callable(jac):
+            options['jac'] = lambda t, x: jac(t, x, *args)
+
+    if t_eval is not None:
+        t_eval = np.asarray(t_eval)
+        if t_eval.ndim != 1:
+            raise ValueError("`t_eval` must be 1-dimensional.")
+
+        if np.any(t_eval < min(t0, tf)) or np.any(t_eval > max(t0, tf)):
+            raise ValueError("Values in `t_eval` are not within `t_span`.")
+
+        d = np.diff(t_eval)
+        if tf > t0 and np.any(d <= 0) or tf < t0 and np.any(d >= 0):
+            raise ValueError("Values in `t_eval` are not properly sorted.")
+
+        if tf > t0:
+            t_eval_i = 0
+        else:
+            # Make order of t_eval decreasing to use np.searchsorted.
+            t_eval = t_eval[::-1]
+            # This will be an upper bound for slices.
+            t_eval_i = t_eval.shape[0]
+
+    if method in METHODS:
+        method = METHODS[method]
+
+    solver = method(fun, t0, y0, tf, vectorized=vectorized, **options)
+
+    tsub=[]
+    ysub=[]
+    fsub=[]
+    if t_eval is None:
+        ts = [t0]
+        ys = [y0]
+    elif t_eval is not None and dense_output:
+        ts = []
+        ti = [t0]
+        ys = []
+    else:
+        ts = []
+        ys = []
+
+    interpolants = []
+
+    events, is_terminal, event_dir = prepare_events(events)
+
+    if events is not None:
+        if args is not None:
+            # Wrap user functions in lambdas to hide the additional parameters.
+            # The original event function is passed as a keyword argument to the
+            # lambda to keep the original function in scope (i.e., avoid the
+            # late binding closure "gotcha").
+            events = [lambda t, x, event=event: event(t, x, *args)
+                      for event in events]
+        g = [event(t0, y0) for event in events]
+        t_events = [[] for _ in range(len(events))]
+        y_events = [[] for _ in range(len(events))]
+    else:
+        t_events = None
+        y_events = None
+
+    status = None
+    while status is None:
+        message = solver.step()
+
+        if solver.status == 'finished':
+            status = 0
+        elif solver.status == 'failed':
+            status = -1
+            break
+
+        t_old = solver.t_old
+        t = solver.t
+        y = solver.y
+
+        if return_substeps:
+            tres=solver.t_substeps
+            yres=solver.y_substeps
+            fres=solver.f_substeps
+            assert tres[-1]==t
+            assert np.all(yres[-1]==y)
+
+        if dense_output:
+            sol = solver.dense_output()
+            interpolants.append(sol)
+        else:
+            sol = None
+
+        if events is not None:
+            g_new = [event(t, y) for event in events]
+            active_events = find_active_events(g, g_new, event_dir)
+            if active_events.size > 0:
+                if sol is None:
+                    sol = solver.dense_output()
+                print('SCIPY:solve_ivp: solving for precise event occurence')
+                root_indices, roots, terminate = handle_events(
+                    sol, events, active_events, is_terminal, t_old, t)
+
+                for e, te in zip(root_indices, roots):
+                    t_events[e].append(te)
+                    y_events[e].append(sol(te))
+
+                if terminate:
+                    status = 1
+                    t = roots[-1]
+                    y = sol(t)
+
+            g = g_new
+
+        if return_substeps:
+            tsub.extend(tres)
+            ysub.extend(yres)
+            fsub.extend(fres)
+        if t_eval is None:
+            ts.append(t)
+            ys.append(y)
+        else:
+            # The value in t_eval equal to t will be included.
+            if solver.direction > 0:
+                t_eval_i_new = np.searchsorted(t_eval, t, side='right')
+                t_eval_step = t_eval[t_eval_i:t_eval_i_new]
+            else:
+                t_eval_i_new = np.searchsorted(t_eval, t, side='left')
+                # It has to be done with two slice operations, because
+                # you can't slice to 0th element inclusive using backward
+                # slicing.
+                t_eval_step = t_eval[t_eval_i_new:t_eval_i][::-1]
+
+            if t_eval_step.size > 0:
+                if sol is None:
+                    sol = solver.dense_output()
+                ts.append(t_eval_step)
+                ys.append(sol(t_eval_step))
+                t_eval_i = t_eval_i_new
+
+        if t_eval is not None and dense_output:
+            ti.append(t)
+
+    message = MESSAGES.get(status, message)
+
+    if t_events is not None:
+        t_events = [np.asarray(te) for te in t_events]
+        y_events = [np.asarray(ye) for ye in y_events]
+
+    if t_eval is None:
+        ts = np.array(ts)
+        ys = np.vstack(ys).T
+    else:
+        ts = np.hstack(ts)
+        ys = np.hstack(ys)
+
+    if dense_output:
+        if t_eval is None:
+            sol = OdeSolution(ts, interpolants)
+        else:
+            sol = OdeSolution(ti, interpolants)
+    else:
+        sol = None
+
+    out = OdeResult(t=ts, y=ys, sol=sol, t_events=t_events, y_events=y_events,
+                     nfev=solver.nfev, njev=solver.njev, nlu=solver.nlu,
+                     status=status, message=message, success=status >= 0)
+    out.solver = solver
+    if return_substeps:
+        # import pdb; pdb.set_trace()
+        out.ysub = np.vstack(ysub).T
+        out.tsub = np.hstack(tsub)
+        out.fsub = np.vstack(fsub).T
+    return out

@@ -5,7 +5,7 @@ Created on Mon Nov  2 14:54:33 2020
 
 The idea is to test the "mass" option with the simple Roberston system
 (see [1]). This is a stiff ODE system which reads:
-  
+
    dy[0]/dt = -0.04*y[0] + 1e4*y[1]*y[2]
    dy[1]/dt =  0.04*y[0] - 1e4*y[1]*y[2] - 3e7*(y[1]**2)
    dy[2]/dt =  3e7*(y[1]**2)
@@ -13,16 +13,16 @@ The idea is to test the "mass" option with the simple Roberston system
 with initial conditions y(t0)=[1,0,0].
 
 By summing the three time derivatives, we see that the system has the following invariant:
-  
+
    y[0] + y[1] + y[2] = 1
 
 This allows simple ODE (no mass matrix) can also be reformulated as a DAE
 (semi-explicit index-1,  also called Hessenberg index-1):
-   
+
    dy[0]/dt = -0.04*y[0] + 1e4*y[1]*y[2]
    dy[1]/dt =  0.04*y[0] - 1e4*y[1]*y[2] - 3e7*(y[1]**2)
    0        =  y[0] + y[1] + y[2] - 1
-   
+
 where y[2] has become an algebraic variable.
 
 It is easy to provide this DAE system to a standard implicit ODE solver by
@@ -37,12 +37,12 @@ introducing a singular mass matrix:
   and f = [ -0.04*y[0] + 1e4*y[1]*y[2],
              0.04*y[0] - 1e4*y[1]*y[2] - 3e7*(y[1]**2),
              y[0] + y[1] + y[2] - 1 ]
-  
+
 We can then verify that the DAE is solved correctly by comparing its solution
 to the one of the original ODE system.
 
 References:
-  [1] Robertson, H.H. The solution of a set of reaction rate equations. 
+  [1] Robertson, H.H. The solution of a set of reaction rate equations.
       In Numerical Analysis: An Introduction;Academic Press: London, UK, 1966
 
 @author: laurent
@@ -60,7 +60,7 @@ from radauDAE import RadauDAE
 method=RadauDAE
 
 
-bPrint=False # if True, Radau prints additional information during the computation
+bPrint=True # if True, Radau prints additional information during the computation
 
 #%% Define the ODE formulation
 mass     = np.array([[1.,0.,0.],[0.,1.,0.],[0.,0.,0.]])
@@ -74,6 +74,8 @@ coeff = 1e0 # scaling for the algebraic equations
 modelfun_DAE = lambda t,y: np.array([-0.04*y[0] + 1e4*y[1]*y[2],
                                      0.04*y[0] - 1e4*y[1]*y[2] - 3e7*(y[1]**2),
                                      coeff*(y[0] + y[1] + y[2] - 1)])
+var_index = np.array([0,0,1]) # index of the components
+
 jac_dae = lambda t,y: np.array([[-0.04, 1e4*y[2], 1e4*y[1]],
                                 [0.04, -1e4*y[2] - 2*3e7*y[1], 1e4*y[1]],
                                 [coeff, coeff, coeff],])
@@ -93,13 +95,20 @@ tf = 5e6 # final time
 sol_ode = solve_ivp(fun=modelfun_ODE, t_span=(0., tf), y0=y0, max_step=np.inf,
                     rtol=rtol, atol=atol, jac=None, jac_sparsity=None,
                     method=method, vectorized=False, first_step=1e-8, dense_output=True,
-                    mass=None, bPrint=bPrint)
+                    mass_matrix=None, bPrint=bPrint)
 
 # solve the DAE formulation
 sol_dae = solve_ivp(fun=modelfun_DAE, t_span=(0., tf), y0=y0, max_step=np.inf,
                     rtol=rtol, atol=atol, jac=jac_dae, jac_sparsity=None,
                     method=method, vectorized=False, first_step=1e-8, dense_output=True,
-                    mass=mass, bPrint=bPrint)
+                    max_newton_ite=8, min_factor=0.2, max_factor=10,
+                    var_index=var_index,
+                    # newton_tol=1e-4,
+                    scale_residuals = True,
+                    scale_newton_norm = True,
+                    scale_error = True,
+                    max_bad_ite=1,
+                    mass_matrix=mass, bPrint=bPrint)
 
 # print("DAE solved in {} time steps, {} fev, {} jev, {} LUdec, {} LU solves".format(
 #   sol_dae.t.size, sol_dae.nfev, sol_dae.njev, sol_dae.nlu, sol_dae.solver.nlusove))
@@ -187,7 +196,7 @@ denseout_ode = sol_ode.sol(test_t)
 # Relative error on the dense output (DAE vs ODE)
 plt.figure()
 for i in range(3):
-  plt.semilogy(test_t, np.abs(denseout_ode[i,:] - denseout_dae[i,:])/(atol+denseout_ode[i,:]), linewidth=2/(i+1))
+  plt.semilogy(test_t, abs(denseout_ode[i,:] - denseout_dae[i,:])/(atol+abs(denseout_ode[i,:])), linewidth=2/(i+1))
 plt.xlabel('t (s)')
 plt.ylim(1e-20, 1e5)
 plt.grid()

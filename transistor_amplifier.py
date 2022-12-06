@@ -15,11 +15,11 @@ from radauDAE import RadauDAE
 method=RadauDAE
 
 """ Transistor amplifier as describer in [1], page 377. The system is of the form:
-  
+
   M y' = f(t,y)
-  
+
   with a singular masss matrix M. The resulting DAE is of index 1.
-  
+
   The cicuirt has the tension Ue as input (sinusoid). The output of the
   circuit is U5, which is an amplification of Ue.
 
@@ -75,7 +75,7 @@ rtol=1e-4; atol=1e-4
 sol = solve_ivp(fun=modelfun_DAE, t_span=(0., tf), y0=y0, max_step=np.inf,
                     rtol=rtol, atol=atol, jac=jac_dae, jac_sparsity=None,
                     method=method, vectorized=False, first_step=1e-8, dense_output=True,
-                    mass=mass)
+                    mass_matrix=mass)
 
 #%% Tests
 assert_(sol.success, msg='DAE solution failed with solver {method}')
