@@ -11,18 +11,29 @@
   length). The i-th Lagrange multiplier is thus the force exerted by the
   (i-1)-th rod on the i-th mass.
 
+  Some treatment of the algebraic variables is inspired by [2].
+
+      References
+    ----------
+    .. [1] E. Hairer, G. Wanner, "Solving Ordinary Differential Equations II:
+           Stiff and Differential-Algebraic Problems", Sec. IV.8.
+    .. [2] E. Hairer, C. Lubich, M. Roche, "The Numerical Solution of
+           Differential-Algebraic Systems by Runge-Kutta Methods"
+
 @author: laurent
 """
 import numpy as np
+import scipy.sparse
+import scipy.optimize._numdiff
 
 
-n_pendulum = 10
+n_pendulum = 500
 n=n_pendulum
 
 g=9.81
 
 ## Initial conditions for each pendulum
-theta_0     = np.array([3*np.pi/4 for i in range(n)])
+theta_0     = np.array([2*np.pi/4 for i in range(n)])
 # theta_0[-1] = np.pi/2
 # theta_0     = np.array([np.pi/2 for i in range(n)])
 # # theta_0     = np.array([0. for i in range(n)])
@@ -82,9 +93,11 @@ def generateSytem(n,chosen_index=3):
         diag_mass = np.ones((n*5,))
         var_index = np.zeros((n*5,))
         for i in range(n):
-          diag_mass[4 + i*5] = 0.
+          diag_mass[4 + i*5] = 0
+          var_index[2 + i*5] = 2 # weird but so is it specified in [1]
+          var_index[3 + i*5] = 2
           var_index[4 + i*5] = 3
-        mass = np.diag(diag_mass)
+        mass = scipy.sparse.diags(diag_mass, format=('csc'))
         jac_dae = None
 
     elif chosen_index==2:
@@ -125,10 +138,9 @@ def generateSytem(n,chosen_index=3):
     # alternatively, define the Jacobian via finite-differences, via complex-step
     # to ensure machine accuracy
     if jac_dae is None:
-        import scipy.optimize._numdiff
-        import scipy.sparse
-        # sparsity = scipy.sparse.diags(diagonals=[np.ones(n*5-abs(i)) for i in range(-7,7)], offsets=[i for i in range(-7,7)])
-        sparsity = None
+        sparsity = scipy.sparse.diags(diagonals=[np.ones(n*5-abs(i)) for i in range(-10,10)], offsets=[i for i in range(-10,10)],
+                                      format='csc')
+        # sparsity = None
         jac_dae = lambda t,x: scipy.optimize._numdiff.approx_derivative(
                                     fun=lambda x: dae_fun(t,x),
                                     x0=x, method='cs',
@@ -136,6 +148,7 @@ def generateSytem(n,chosen_index=3):
                                     bounds=(-np.inf, np.inf), sparsity=sparsity,
                                     as_linear_operator=False, args=(),
                                     kwargs={})
+
     ## Otherwise, the Radau solver uses its own routine to estimate the Jacobian, however the
     # original Scipy routine is only adapted to ODEs and may fail at correctly
     # determining the Jacobian because of it would chosse finite-difference step
@@ -153,7 +166,7 @@ def generateSytem(n,chosen_index=3):
     # the initial condition should be consistent with the algebraic equations
     Xini =np.vstack((x0, y0, vx0, vy0, lbda0)).reshape((-1,), order='F')
 
-    return dae_fun, jac_dae, mass, Xini, var_index
+    return dae_fun, jac_dae, sparsity, mass, Xini, var_index
 
 #%%
 if __name__=='__main__':
@@ -167,12 +180,12 @@ if __name__=='__main__':
     # from radauDAE_subjac import RadauDAE
     ###### Parameters to play with
     chosen_index = 3 # The index of the DAE formulation
-    tf = 3.0       # final time (one oscillation is ~2s long)
+    tf = 60.0       # final time (one oscillation is ~2s long)
     rtol=1e-4; atol=rtol # relative and absolute tolerances for time adaptation
     bPrint=False # if True, additional printouts from Radau during the computation
     method=RadauDAE
 
-    dae_fun, jac_dae, mass, Xini, var_index = generateSytem(n_pendulum, chosen_index)
+    dae_fun, jac_dae, sparsity, mass, Xini, var_index = generateSytem(n_pendulum, chosen_index)
 
     ##TODO: find the correct lbda by ensuring that constraints are satisfied at=0,
     ##    --> need to differentiate the cosntraint twice to let lbda appear
@@ -198,7 +211,7 @@ if __name__=='__main__':
     #%% Solve the DAE
     print(f'Solving the index {chosen_index} formulation')
     sol = solve_ivp(fun=dae_fun, t_span=(0., tf), y0=Xini, max_step=tf/10,
-                    rtol=rtol, atol=atol, jac=jac_dae, jac_sparsity=None,
+                    rtol=rtol, atol=atol, jac=jac_dae, jac_sparsity=sparsity,
                     method=method, vectorized=False, first_step=1e-3, dense_output=True,
                     mass_matrix=mass, bPrint=bPrint, bPrintProgress=True,
                     max_newton_ite=15, min_factor=0.2, max_factor=10,
@@ -263,7 +276,7 @@ if __name__=='__main__':
     plt.ylabel('absolute rod tension (N)')
 
     #%%
-    plt.figure()
+    plt.figure(figsize=(5,5))
     for i in range(n_pendulum):
       plt.plot(x[i,:], y[i,:], linestyle='--')
     plt.grid()
@@ -279,8 +292,9 @@ if __name__=='__main__':
     plt.axis('equal')
     plt.xlabel('x')
     plt.ylabel('y')
-    plt.ylim(-20,20)
-    plt.xlim(-20,20)
+    L0 = length[0]
+    plt.ylim(-L0,L0)
+    plt.xlim(-L0,L0)
 #%%
 if 0:
   #%% Create animation
@@ -298,28 +312,27 @@ if 0:
   ax.set_aspect('equal')
 
   lines, = plt.plot([], [], linestyle='-', linewidth=1.5, marker=None, color='tab:blue') # rods
+  if n_pendulum<50:
+      marker='o'
+  else:
+      marker=None
   points, = plt.plot([],[], marker='o', linestyle='', color=[0,0,0]) # mass joints
   # paths  = [plt.plot([],[], alpha=0.2, color='tab:orange')[0] for i in range(n_pendulum)] # paths of the pendulum
   time_template = r'$t = {:.2f}$ s'
   time_text = ax.text(0.05, 0.9, '', transform=ax.transAxes)
 
   def init():
-      return lines,points #paths
+      return lines,points
 
   def update(t):
-      print(t)
       interped_sol = sol.sol(t)
       x,y = np.hstack((0.,interped_sol[::5])), np.hstack((0.,interped_sol[1::5]))
       lines.set_data(x,y)
       points.set_data(x,y)
       time_text.set_text(time_template.format(t))
 
-      # t_path = np.linspace(sol.t[0], t, )
-      # interped_sol = sol.sol(t)
-      # x,y = interped_sol[::5], interped_sol[1::5]
-      # paths.set_data
+      return lines, time_text, points
 
-      return lines, time_text, points#, paths
   if 0:# test layout
     init()
     update(sol.t[-1]/2)
@@ -328,9 +341,10 @@ if 0:
     fps=8
     total_frames = np.ceil((sol.t[-1]-sol.t[0])*fps).astype(int)
 
-    ani = animation.FuncAnimation(fig, update, frames=np.linspace(sol.t[0], sol.t[-1],total_frames),
+    from tqdm import tqdm
+    ani = animation.FuncAnimation(fig, update, frames=tqdm(np.linspace(sol.t[0], sol.t[-1],total_frames)),
                         init_func=init, interval=200, blit=True)
-    ani.save('/tmp/animation_new.gif', writer='imagemagick', fps=30)
+    ani.save('/tmp/animation_new2.gif', writer='imagemagick', fps=30)
     # writer = animation.writers['ffmpeg'](fps=24, metadata=dict(artist='Me'), bitrate=1800)
     # ani.save('animation.mp4', writer=writer)
   plt.show()

@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.linalg import lu_factor, lu_solve
-from scipy.sparse import csc_matrix, issparse, eye
+from scipy.sparse import csc_matrix, issparse, eye, diags
 from scipy.sparse.linalg import splu
 from scipy.optimize._numdiff import group_columns
 from scipy.integrate._ivp.common import (validate_max_step, validate_tol, select_initial_step,
@@ -477,7 +477,10 @@ class RadauDAE(OdeSolver):
                   if self.scale_residuals:
                     # residuals associated with high-index components are scaled (see [3], p97)
                     # self.hscale = np.diag(h**(-self.var_index))
-                    self.hscale = np.diag(h**(-np.minimum(1,self.var_index))) # only by h or 1
+                    if issparse(self.I):
+                        self.hscale = diags(h**(-np.minimum(1,self.var_index)), offsets=0, format='csc')
+                    else:
+                        self.hscale = np.diag(h**(-np.minimum(1,self.var_index))) # only by h or 1
                     #TODO: sparse implementation
                   try:
                       if BPRINT:
