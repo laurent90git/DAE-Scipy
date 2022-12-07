@@ -75,7 +75,14 @@ rtol=1e-4; atol=1e-4
 sol = solve_ivp(fun=modelfun_DAE, t_span=(0., tf), y0=y0, max_step=np.inf,
                     rtol=rtol, atol=atol, jac=jac_dae, jac_sparsity=None,
                     method=method, vectorized=False, first_step=1e-8, dense_output=True,
-                    mass_matrix=mass)
+                    mass_matrix=mass,
+                    var_index=None,
+                    # newton_tol=1e-2,
+                    scale_residuals = False,
+                    scale_newton_norm = False,
+                    scale_error = False,
+                    zero_algebraic_error = False,
+                    max_bad_ite=1)
 
 #%% Tests
 assert_(sol.success, msg='DAE solution failed with solver {method}')

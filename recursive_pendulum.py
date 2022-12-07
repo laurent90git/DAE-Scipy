@@ -27,7 +27,7 @@ import scipy.sparse
 import scipy.optimize._numdiff
 
 
-n_pendulum = 200
+n_pendulum = 50
 
 n=n_pendulum
 
@@ -41,17 +41,31 @@ theta_0     = np.array([1*np.pi/4 for i in range(n)])
 # theta_0[-1] = np.pi/3
 theta_dot0  = np.array([0. for i in range(n)]);
 
-m_chord = 1.
-m_final = 1.
-L_chord = 2.
-m_node = m_chord / (n_pendulum-1)
-L_rod  = L_chord / n_pendulum
+if 1: # chord with a mass at the end
+    m_chord = 1.
+    m_final = 1.
+    L_chord = 2.
+    m_node = m_chord / (n_pendulum-1)
+    L_rod  = L_chord / n_pendulum
 
-r0  = np.array([L_rod for i in range(n)])
-r0s = r0**2
-m   = np.array([m_node for i in range(n)])
-m[-1] = m_final
+    r0  = np.array([L_rod for i in range(n)])
+    r0s = r0**2
+    m   = np.array([m_node for i in range(n)])
+    m[-1] = m_final
+else: # also at the middle
+    m_chord  = 1.
+    m_final  = 5.
+    m_middle = 5.
 
+    L_chord = 2.
+    m_node = m_chord / n_pendulum
+    L_rod  = L_chord / n_pendulum
+
+    r0  = np.array([L_rod for i in range(n)])
+    r0s = r0**2
+    m   = np.array([m_node for i in range(n)])
+    m[-1] = m_final
+    m[len(m)//2]=m_middle
 #%% Setup the model based on the chosen formulation
 def generateSytem(n,chosen_index=3):
     """ Generates the DAE function representing the pendulum with the desired
@@ -187,14 +201,14 @@ if __name__=='__main__':
     ###### Parameters to play with
     chosen_index = 3 # The index of the DAE formulation
     # tf = 10.0       # final time (one oscillation is ~2s long)
-    rtol=1e-5; atol=rtol # relative and absolute tolerances for time adaptation
+    rtol=1e-6; atol=rtol # relative and absolute tolerances for time adaptation
     bPrint=False # if True, additional printouts from Radau during the computation
     method=RadauDAE
 
     dae_fun, jac_dae, sparsity, mass, Xini, var_index = generateSytem(n_pendulum, chosen_index)
 
     T_th = 2*np.pi*np.sqrt(L_chord/g) # theoretical period for a linear pendulum
-    tf = 5*T_th
+    tf = 2*T_th
     ##TODO: find the correct lbda by ensuring that constraints are satisfied at=0,
     ##    --> need to differentiate the cosntraint twice to let lbda appear
     # def objfun(x):
@@ -345,6 +359,7 @@ if 0:
       x,y = np.hstack((0.,interped_sol[::5])), np.hstack((0.,interped_sol[1::5]))
       lines.set_data(x,y)
       # points.set_data(x,y)
+      # points.set_data(x[-1],y[-1]) # only plot last mass
       points.set_data(x[-1],y[-1]) # only plot last mass
       time_text.set_text(time_template.format(t))
 
@@ -355,13 +370,13 @@ if 0:
     update(sol.t[-1]/2)
   else:
     # compute how many frames we want for real time
-    fps=8
+    fps=30
     total_frames = np.ceil((sol.t[-1]-sol.t[0])*fps).astype(int)
 
     from tqdm import tqdm
     ani = animation.FuncAnimation(fig, update, frames=tqdm(np.linspace(sol.t[0], sol.t[-1],total_frames)),
                         init_func=init, interval=200, blit=True)
-    ani.save('/tmp/animation_new4.gif', writer='imagemagick', fps=30)
+    ani.save('/tmp/animation_new7.gif', writer='imagemagick', fps=30)
     # writer = animation.writers['ffmpeg'](fps=24, metadata=dict(artist='Me'), bitrate=1800)
     # ani.save('animation.mp4', writer=writer)
   plt.show()

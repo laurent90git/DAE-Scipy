@@ -241,6 +241,7 @@ class RadauDAE(OdeSolver):
         self.h_abs_old = None
         self.error_norm_old = None
 
+        # newton tolerance (relative to the integration error tolerance)
         if newton_tol is None:
             self.newton_tol = max(10 * EPS / rtol, min(0.03, rtol ** 0.5))
         else:
