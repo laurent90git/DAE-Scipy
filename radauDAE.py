@@ -93,6 +93,7 @@ class RadauDAE(OdeSolver):
     The implementation follows [1]_. The error is controlled with a
     third-order accurate embedded formula. A cubic polynomial which satisfies
     the collocation conditions is used for the dense output.
+    Specific treatment of differential-algebraic systems follows [3]_.
 
     Parameters
     ----------
@@ -204,6 +205,8 @@ class RadauDAE(OdeSolver):
     .. [2] A. Curtis, M. J. D. Powell, and J. Reid, "On the estimation of
            sparse Jacobian matrices", Journal of the Institute of Mathematics
            and its Applications, 13, pp. 117-120, 1974.
+    .. [3] E. Hairer, C. Lubich, M. Roche, "The Numerical Solution of
+           Differential-Algebraic Systems by Runge-Kutta Methods"
     """
     def __init__(self, fun, t0, y0, t_bound, max_step=np.inf,
                  rtol=1e-3, atol=1e-6, jac=None, jac_sparsity=None,
@@ -232,7 +235,7 @@ class RadauDAE(OdeSolver):
                     self.fun, self.t, self.y, self.f, self.direction,
                     3, self.rtol, self.atol)
             else: # as in [1], default to 1e-6
-                self.h_abs = self.direction * min(1e-6, abs(self.t_bound[1]-self.t_bound[0]))
+                self.h_abs = self.direction * min(1e-6, abs(self.t_bound-self.t0))
         else:
             self.h_abs = validate_first_step(first_step, t0, t_bound)
         self.h_abs_old = None
@@ -409,7 +412,7 @@ class RadauDAE(OdeSolver):
         atol = self.atol
         rtol = self.rtol
 
-        min_step = 1e-20 #10 * np.abs(np.nextafter(t, self.direction * np.inf) - t)
+        min_step = 10 * np.abs(np.nextafter(t, self.direction * np.inf) - t)
         if self.h_abs > max_step:
             h_abs = max_step
             h_abs_old = None
@@ -422,6 +425,16 @@ class RadauDAE(OdeSolver):
             h_abs = self.h_abs
             h_abs_old = self.h_abs_old
             error_norm_old = self.error_norm_old
+
+        if abs(self.t_bound - (t + self.direction * h_abs)) < 1e-2*h_abs:
+            # the next time step would be too small
+            # --> we cut the remaining time in half
+            if BPRINT:
+                print('Reducing time step to avoid a last tiny step')
+            h_abs = abs(self.t_bound - t) / 2
+            # require refactorisation of the iteration matrices
+            self.LU_real = None
+            self.LU_complex = None
 
         J = self.J
         LU_real = self.LU_real
@@ -446,12 +459,11 @@ class RadauDAE(OdeSolver):
             h = t_new - t # may introduce numerical rounding errors
             h_abs = np.abs(h)
 
-
-            # Z0 = np.zeros((3, y.shape[0]))
+            # initial solution for the Newton solve
             if self.sol is None:
                 Z0 = np.zeros((3, y.shape[0]))
             else:
-                Z0 = self.sol(t + h * C).T - y
+                Z0 = self.sol(t + h * C).T - y  # extrapolate using previous dense output
 
             newton_scale = atol + np.abs(y) * rtol
             if self.scale_newton_norm:
@@ -459,18 +471,23 @@ class RadauDAE(OdeSolver):
 
             converged = False
             while not converged:
+                if BPRINT:
+                  print('solving system at t={} with dt={}'.format(t,h))
                 if LU_real is None or LU_complex is None:
                   if self.scale_residuals:
-                    self.hscale = np.diag(h**(-self.var_index))
-                    # self.hscale = np.diag(h**(-np.minimum(1,self.var_index))) # only by h or 1
+                    # residuals associated with high-index components are scaled (see [3], p97)
+                    # self.hscale = np.diag(h**(-self.var_index))
+                    self.hscale = np.diag(h**(-np.minimum(1,self.var_index))) # only by h or 1
+                    #TODO: sparse implementation
                   try:
+                      if BPRINT:
+                          print('\tLU-decomposition of system Jacobian')
                       LU_real    = self.lu( self.hscale @ (MU_REAL    / h * self.mass_matrix - J) )
                       LU_complex = self.lu( self.hscale @ (MU_COMPLEX / h * self.mass_matrix - J) )
                   except ValueError as e:
                     # import pdb; pdb.set_trace()
                     return False, 'LU decomposition failed ({})'.format(e)
-                if BPRINT:
-                  print('solving system at t={} with dt={}'.format(t,h))
+
                   if self.bDebug:
                       U_matrix = np.triu(LU_real[0],k=0)
                       L_matrix = np.tril(LU_real[0],k=-1)+self.I
@@ -526,16 +543,6 @@ class RadauDAE(OdeSolver):
 
                 # see [1], chapter IV.8, page 127
                 error = self.solve_lu(LU_real, f + self.mass_matrix.dot(ZE))
-                # if self.index_algebraic_vars is not None:
-                #     # correct for the overestimation of the error on
-                #     # algebraic variables, ideally multiply their errors by
-                #     # (h ** index)
-                #     error[self.index_algebraic_vars] = 0.
-                #     error_norm = np.linalg.norm(error / err_scale) / (n - self.nvars_algebraic) ** 0.5
-                #     # we exclude the algebraic components, otherwise
-                #     # they artificially lower the error norm
-                # else:
-                #     error_norm = norm(error / err_scale)
                 if self.zero_algebraic_error:
                     error[ self.index_algebraic_vars ] = 0.
                     error_norm = np.linalg.norm(error / err_scale) / (n - self.nvars_algebraic) ** 0.5
@@ -546,26 +553,49 @@ class RadauDAE(OdeSolver):
                                                            + n_iter)
                 if BPRINT:
                   print('\t1st error estimate: {:.3e}'.format(error_norm))
-                if rejected and error_norm > 1: # try with stabilised error estimate
+                # if rejected and error_norm > 1: # try with stabilised error estimate
+                #     if BPRINT:
+                #       print('\t rejected')
+                #     error = self.solve_lu(LU_real, self.fun(t, y + error) + self.mass_matrix.dot(ZE))
+                #     if self.zero_algebraic_error:
+                #         error[ self.index_algebraic_vars ] = 0.
+                #         error_norm = np.linalg.norm(error / err_scale) / (n - self.nvars_algebraic) ** 0.5
+                #     else:
+                #         error_norm = norm(error / err_scale)
+
+                #     if BPRINT:
+                #       print('\t2nd error estimate: {:.3e}'.format(error_norm))
+                # if error_norm > 1:
+                #     if BPRINT:
+                #         print('\t step rejected')
+                #     if BPRINT and y_new.size<10:
+                #       print('\terror (scaled)=',error/err_scale)
+                #     factor = predict_factor(h_abs, h_abs_old,
+                #                             error_norm, error_norm_old)
+                #     h_abs *= max(self.MIN_FACTOR, safety * factor)
+                #     LU_real = None
+                #     LU_complex = None
+                #     rejected = True
+                # else:
+                #     if BPRINT:
+                #         print('\t step accepted')
+                #     step_accepted = True
+
+                if error_norm > 1: # try with stabilised error estimate
                     if BPRINT:
                       print('\t rejected')
                     error = self.solve_lu(LU_real, self.fun(t, y + error) + self.mass_matrix.dot(ZE))
-                    # if self.index_algebraic_vars is not None:
-                    #     error[self.index_algebraic_vars] = 0. # ideally error*(h**index)
-                    #     error_norm = np.linalg.norm( error/err_scale ) / (n - self.nvars_algebraic)** 0.5
-                    #     # we exclude the algebraic components, as they would otherwise artificially lower the error norm
-                    #     # error_norm = norm(error / err_scale)
-                    # else:
-                    #     error_norm = norm(error / err_scale)
                     if self.zero_algebraic_error:
                         error[ self.index_algebraic_vars ] = 0.
                         error_norm = np.linalg.norm(error / err_scale) / (n - self.nvars_algebraic) ** 0.5
                     else:
                         error_norm = norm(error / err_scale)
-
                     if BPRINT:
                       print('\t2nd error estimate: {:.3e}'.format(error_norm))
+
                 if error_norm > 1:
+                    if BPRINT:
+                        print('\t step rejected')
                     if BPRINT and y_new.size<10:
                       print('\terror (scaled)=',error/err_scale)
                     factor = predict_factor(h_abs, h_abs_old,
@@ -576,9 +606,8 @@ class RadauDAE(OdeSolver):
                     rejected = True
                 else:
                     if BPRINT:
-                        print('\terror estimate is small enough')
+                        print('\t step accepted')
                     step_accepted = True
-
 	## Step is converged and accepted
         recompute_jac = jac is not None and n_iter > 2 and rate > 1e-3
 

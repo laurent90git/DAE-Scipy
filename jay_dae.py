@@ -14,6 +14,7 @@ import numpy as np
 
 from scipy.integrate import solve_ivp#, Radau
 from radauDAE import RadauDAE as Radau
+# from radauDAE_subjac import RadauDAE as Radau
 from scipy.optimize._numdiff import approx_derivative
 
 
@@ -57,7 +58,7 @@ def generate_Jay1995(nonlinear_multiplier):
 
     # initial conditions
     y0 = np.ones(5, dtype=float)
-    y0[-1] = 4.
+    y0[-1] = 1.
 
     t_span = (0, 0.1)
     # var_index = None
@@ -71,27 +72,54 @@ if __name__ == "__main__":
         nonlinear_multiplier=True
     )
 
+    # sol = solve_ivp(
+    #                     fun=fun,
+    #                     t_span=t_span,
+    #                     y0=y0,
+    #                     rtol=1e-10,
+    #                     atol=1e-10,
+    #                     jac=jac,
+    #                     method=Radau,
+    #                     first_step=1e-5,
+    #                     mass_matrix=mass_matrix,
+    #                     bPrint=True,
+    #                     dense_output=True,
+    #                     max_newton_ite=10, min_factor=0.2, max_factor=10,
+    #                     var_index=var_index,
+    #                     # newton_tol=1e-1,
+    #                     zero_algebraic_error = True,
+    #                     scale_residuals = True,
+    #                     scale_newton_norm = True,
+    #                     scale_error = True,
+    #                     max_bad_ite=2,
+    #                     max_inner_jac_update=3,
+    #                 )
+
+    dt = 1e-4
     sol = solve_ivp(
                         fun=fun,
                         t_span=t_span,
                         y0=y0,
-                        rtol=1e-5,
-                        atol=1e-10,
+                        rtol=1e0,
+                        atol=1e-2,
                         jac=jac,
                         method=Radau,
-                        first_step=1e-5,
+                        first_step=dt,
+                        max_step=dt,
+                        constant_dt=True,
                         mass_matrix=mass_matrix,
                         bPrint=True,
                         dense_output=True,
-                        max_newton_ite=8, min_factor=0.2, max_factor=10,
+                        max_newton_ite=10, min_factor=0.2, max_factor=10,
                         var_index=var_index,
-                        newton_tol=1e-4,
+                        newton_tol=1e-8,
+                        zero_algebraic_error = True,
                         scale_residuals = True,
                         scale_newton_norm = True,
                         scale_error = True,
                         max_bad_ite=1,
+                        max_inner_jac_update=1,
                     )
-
 
     assert sol.success
 

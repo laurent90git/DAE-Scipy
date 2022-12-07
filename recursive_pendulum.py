@@ -16,7 +16,7 @@
 import numpy as np
 
 
-n_pendulum = 100
+n_pendulum = 10
 n=n_pendulum
 
 g=9.81
@@ -75,6 +75,7 @@ def generateSytem(n,chosen_index=3):
           dt_vx[-1]  = (1/m[-1]) *  (+lbda[-1]*dx[-1]/rs[-1])
           dt_vy[-1]  = (1/m[-1]) *  (+lbda[-1]*dy[-1]/rs[-1] - m[-1]*g)
 
+          # constraints = rs**0.5 - r0s**0.5
           constraints = rs - r0s
           return np.vstack((dt_x, dt_y, dt_vx, dt_vy, constraints)).reshape((-1,), order='F')
 
@@ -83,6 +84,38 @@ def generateSytem(n,chosen_index=3):
         for i in range(n):
           diag_mass[4 + i*5] = 0.
           var_index[4 + i*5] = 3
+        mass = np.diag(diag_mass)
+        jac_dae = None
+
+    elif chosen_index==2:
+        def dae_fun(t,X):
+          x=X[0::5]; y=X[1::5]; vx=X[2::5]; vy=X[3::5]; lbda=X[4::5]
+          dt_x = vx
+          dt_y = vy
+          dt_vx = np.zeros_like(x)
+          dt_vy = np.zeros_like(x)
+          constraints = np.zeros_like(x)
+
+          dx = np.hstack((x[0], np.diff(x))) # distances between each node, accounting for the fixed zero-th node
+          dy = np.hstack((y[0], np.diff(y)))
+          rs  = dx**2 + dy**2
+
+          dt_vx[:-1] = (1/m[:-1]) * (+lbda[:-1]*dx[:-1]/rs[:-1] - lbda[1:]*dx[1:]/rs[1:])
+          dt_vy[:-1] = (1/m[:-1]) * (+lbda[:-1]*dy[:-1]/rs[:-1] - lbda[1:]*dy[1:]/rs[1:] - m[:-1]*g)
+
+          dt_vx[-1]  = (1/m[-1]) *  (+lbda[-1]*dx[-1]/rs[-1])
+          dt_vy[-1]  = (1/m[-1]) *  (+lbda[-1]*dy[-1]/rs[-1] - m[-1]*g)
+
+          constraints[1:] = 2*x[1:]*vx[1:] + 2*x[:-1]*vx[:-1] - 2*x[1:]*vx[:-1] - 2*x[:-1]*vx[1:] + \
+                            2*y[1:]*vy[1:] + 2*y[:-1]*vy[:-1] - 2*y[1:]*vy[:-1] - 2*y[:-1]*vy[1:]
+          constraints[0] =  2*x[0]*vx[0] + 2*y[0]*vy[0] # first node is like a single pendulum
+          return np.vstack((dt_x, dt_y, dt_vx, dt_vy, constraints)).reshape((-1,), order='F')
+
+        diag_mass = np.ones((n*5,))
+        var_index = np.zeros((n*5,))
+        for i in range(n):
+          diag_mass[4 + i*5] = 0.
+          var_index[4 + i*5] = 2
         mass = np.diag(diag_mass)
         jac_dae = None
 
@@ -131,6 +164,7 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
 
     from radauDAE import RadauDAE
+    # from radauDAE_subjac import RadauDAE
     ###### Parameters to play with
     chosen_index = 3 # The index of the DAE formulation
     tf = 3.0       # final time (one oscillation is ~2s long)
@@ -159,7 +193,7 @@ if __name__=='__main__':
     #
     # import scipy.optimize
     # out = scipy.optimize.minimize(fun=objfun, jac=jac_objfun, x0=np.zeros(n_pendulum), tol=1e-9)
-    # jac_dae = None
+    jac_dae = None
 
     #%% Solve the DAE
     print(f'Solving the index {chosen_index} formulation')

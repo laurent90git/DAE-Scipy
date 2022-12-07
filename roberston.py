@@ -56,6 +56,7 @@ from numpy.testing import (assert_, assert_allclose,
 
 ## Choice of integration method
 from radauDAE import RadauDAE
+# from radauDAE_subjac import RadauDAE
 
 method=RadauDAE
 
@@ -108,6 +109,7 @@ sol_dae = solve_ivp(fun=modelfun_DAE, t_span=(0., tf), y0=y0, max_step=np.inf,
                     scale_newton_norm = True,
                     scale_error = True,
                     max_bad_ite=1,
+                    max_inner_jac_update = 0,
                     mass_matrix=mass, bPrint=bPrint)
 
 # print("DAE solved in {} time steps, {} fev, {} jev, {} LUdec, {} LU solves".format(
