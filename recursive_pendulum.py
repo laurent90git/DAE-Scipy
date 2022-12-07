@@ -27,24 +27,30 @@ import scipy.sparse
 import scipy.optimize._numdiff
 
 
-n_pendulum = 500
+n_pendulum = 200
+
 n=n_pendulum
 
 g=9.81
 
 ## Initial conditions for each pendulum
-theta_0     = np.array([2*np.pi/4 for i in range(n)])
+theta_0     = np.array([1*np.pi/4 for i in range(n)])
 # theta_0[-1] = np.pi/2
 # theta_0     = np.array([np.pi/2 for i in range(n)])
 # # theta_0     = np.array([0. for i in range(n)])
 # theta_0[-1] = np.pi/3
 theta_dot0  = np.array([0. for i in range(n)]);
 
+m_chord = 1.
+m_final = 1.
+L_chord = 2.
+m_node = m_chord / (n_pendulum-1)
+L_rod  = L_chord / n_pendulum
 
-r0  = np.array([1. for i in range(n)])
+r0  = np.array([L_rod for i in range(n)])
 r0s = r0**2
-m   = np.array([1. for i in range(n)])
-# m[-1] = 3e-1
+m   = np.array([m_node for i in range(n)])
+m[-1] = m_final
 
 #%% Setup the model based on the chosen formulation
 def generateSytem(n,chosen_index=3):
@@ -180,13 +186,15 @@ if __name__=='__main__':
     # from radauDAE_subjac import RadauDAE
     ###### Parameters to play with
     chosen_index = 3 # The index of the DAE formulation
-    tf = 60.0       # final time (one oscillation is ~2s long)
-    rtol=1e-4; atol=rtol # relative and absolute tolerances for time adaptation
+    # tf = 10.0       # final time (one oscillation is ~2s long)
+    rtol=1e-5; atol=rtol # relative and absolute tolerances for time adaptation
     bPrint=False # if True, additional printouts from Radau during the computation
     method=RadauDAE
 
     dae_fun, jac_dae, sparsity, mass, Xini, var_index = generateSytem(n_pendulum, chosen_index)
 
+    T_th = 2*np.pi*np.sqrt(L_chord/g) # theoretical period for a linear pendulum
+    tf = 5*T_th
     ##TODO: find the correct lbda by ensuring that constraints are satisfied at=0,
     ##    --> need to differentiate the cosntraint twice to let lbda appear
     # def objfun(x):
@@ -295,6 +303,13 @@ if __name__=='__main__':
     L0 = length[0]
     plt.ylim(-L0,L0)
     plt.xlim(-L0,L0)
+
+    #%% Find period
+    Ep_mean = (np.max(Ep)+np.min(Ep))/2
+    t_change = t[:-1][np.diff(np.sign(Ep-Ep_mean))<0]
+    print('Numerical period={:.2e} s'.format(2*np.mean(np.diff(t_change)))) # energy oscillates twice as fast
+    print('Theoretical period={:.2e} s'.format(T_th))
+
 #%%
 if 0:
   #%% Create animation
@@ -312,11 +327,12 @@ if 0:
   ax.set_aspect('equal')
 
   lines, = plt.plot([], [], linestyle='-', linewidth=1.5, marker=None, color='tab:blue') # rods
-  if n_pendulum<50:
-      marker='o'
-  else:
-      marker=None
-  points, = plt.plot([],[], marker='o', linestyle='', color=[0,0,0]) # mass joints
+  marker='o'
+  # if n_pendulum<50:
+  #     marker='o'
+  # else:
+  #     marker=None
+  points, = plt.plot([],[], marker=marker, linestyle='', color=[0,0,0]) # mass joints
   # paths  = [plt.plot([],[], alpha=0.2, color='tab:orange')[0] for i in range(n_pendulum)] # paths of the pendulum
   time_template = r'$t = {:.2f}$ s'
   time_text = ax.text(0.05, 0.9, '', transform=ax.transAxes)
@@ -328,7 +344,8 @@ if 0:
       interped_sol = sol.sol(t)
       x,y = np.hstack((0.,interped_sol[::5])), np.hstack((0.,interped_sol[1::5]))
       lines.set_data(x,y)
-      points.set_data(x,y)
+      # points.set_data(x,y)
+      points.set_data(x[-1],y[-1]) # only plot last mass
       time_text.set_text(time_template.format(t))
 
       return lines, time_text, points
@@ -344,7 +361,7 @@ if 0:
     from tqdm import tqdm
     ani = animation.FuncAnimation(fig, update, frames=tqdm(np.linspace(sol.t[0], sol.t[-1],total_frames)),
                         init_func=init, interval=200, blit=True)
-    ani.save('/tmp/animation_new2.gif', writer='imagemagick', fps=30)
+    ani.save('/tmp/animation_new4.gif', writer='imagemagick', fps=30)
     # writer = animation.writers['ffmpeg'](fps=24, metadata=dict(artist='Me'), bitrate=1800)
     # ani.save('animation.mp4', writer=writer)
   plt.show()

@@ -22,8 +22,8 @@ Created on Mon Nov  2 14:54:33 2020
     x^2 + y^2 = r0^2                   (5)
 
   Equation (5) ensures that the rod-length remains constant.
-  By expression sin(theta) as x/(x**2+y**2) and cos(theta)=-y/(x**2+y**2),
-  we may introduce lbda=T/(x**2+y**2) and rewrite Equations (4) and (5) as:
+  By expression sin(theta) as x/sqrt(x**2+y**2) and cos(theta)=-y/sqrt(x**2+y**2),
+  we may introduce lbda=T/sqrt(x**2+y**2) and rewrite Equations (4) and (5) as:
 
     d(vx)/dt = -lbda*x/m               (3a)
     d(vy)/dt = -lbda*y/m - g           (4a)
@@ -245,15 +245,15 @@ if __name__=='__main__':
     rtol=1e-6; atol=rtol # relative and absolute tolerances for time adaptation
     # dt_max = np.inf
     # rtol=1e-3; atol=rtol # relative and absolute tolerances for time adaptation
-    bPrint=True # if True, additional printouts from Radau during the computation
+    bPrint=False # if True, additional printouts from Radau during the computation
     bDebug=False # sutdy condition number of the iteration matrix
     method=RadauDAE
 
 
     ## Physical parameters for the pendulum
-    theta_0=np.pi/2 # initial angle
+    theta_0=np.pi/6 # initial angle
     theta_dot0=0. # initial angular velocity
-    r0=1.  # rod length
+    r0=3.  # rod length
     m=1.   # mass
     g=9.81 # gravitational acceleration
 
@@ -279,6 +279,7 @@ if __name__=='__main__':
 
     # recover the time history of each variable
     x=sol.y[0,:]; y=sol.y[1,:]; vx=sol.y[2,:]; vy=sol.y[3,:]; lbda=sol.y[4,:]
+    T = lbda * np.sqrt(x**2+y**2)
     theta= np.arctan(x/y)
 
     #%% Compute true solution (ODE on the angle in polar coordinates)
@@ -297,7 +298,7 @@ if __name__=='__main__':
     y_ode = -r0*np.cos(theta_ode)
     vx_ode =  r0*theta_dot*np.cos(theta_ode)
     vy_ode =  r0*theta_dot*np.sin(theta_ode)
-    lbda_ode = m*r0*theta_dot**2 + m*g*np.cos(theta_ode)
+    T_ode = m*r0*theta_dot**2 + m*g*np.cos(theta_ode)
 
     #%% Compare the DAE solution and the true solution
     plt.figure()
@@ -348,11 +349,11 @@ if __name__=='__main__':
     ax[i].set_ylabel('velocities')
 
     i+=1
-    ax[i].plot(sol.t, lbda,     color='tab:orange', linestyle='-', linewidth=2, marker='.', label='lbda')
-    ax[i].plot(sol_ode.t, lbda_ode,     color='tab:orange', linestyle='--', linewidth=2, marker=None, label='lbda ODE')
+    ax[i].plot(sol.t, T,     color='tab:orange', linestyle='-', linewidth=2, marker='.', label='lbda')
+    ax[i].plot(sol_ode.t, T_ode,     color='tab:orange', linestyle='--', linewidth=2, marker=None, label='lbda ODE')
     ax[i].grid()
     ax[i].legend(frameon=False)
-    ax[i].set_ylabel('Lagrange\nmultiplier')
+    ax[i].set_ylabel('Lagrange multiplier\n(rod force)')
 
     i+=1
     ax[i].semilogy(sol.t[:-1], np.diff(sol.t), color='tab:blue', linestyle='-', marker='.', linewidth=1, label=r'$\Delta t$ (DAE)')
@@ -407,3 +408,8 @@ if __name__=='__main__':
     plt.xlabel('t (s)')
     plt.ylabel(f'var {ivar}')
     plt.title('Dense output')
+
+    #%% Find period
+    t_change = sol.t[:-1][np.diff(np.sign(vx))<0]
+    print('Numerical period={:.2e} s'.format(np.mean(np.diff(t_change))))
+    print('Theoretical period={:.2e} s'.format(2*np.pi*np.sqrt(r0/g)))
