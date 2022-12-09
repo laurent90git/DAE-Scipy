@@ -25,7 +25,7 @@
 import numpy as np
 import scipy.sparse
 import scipy.optimize._numdiff
-
+import time as pytime
 
 n_pendulum = 50
 
@@ -34,7 +34,7 @@ n=n_pendulum
 g=9.81
 
 ## Initial conditions for each pendulum
-theta_0     = np.array([1*np.pi/4 for i in range(n)])
+theta_0     = np.array([3*np.pi/4 for i in range(n)])
 # theta_0[-1] = np.pi/2
 # theta_0     = np.array([np.pi/2 for i in range(n)])
 # # theta_0     = np.array([0. for i in range(n)])
@@ -232,6 +232,7 @@ if __name__=='__main__':
 
     #%% Solve the DAE
     print(f'Solving the index {chosen_index} formulation')
+    t_start = pytime.time()
     sol = solve_ivp(fun=dae_fun, t_span=(0., tf), y0=Xini, max_step=tf/10,
                     rtol=rtol, atol=atol, jac=jac_dae, jac_sparsity=sparsity,
                     method=method, vectorized=False, first_step=1e-3, dense_output=True,
@@ -245,8 +246,9 @@ if __name__=='__main__':
                     zero_algebraic_error = False,
                     max_bad_ite=1,
                     )
-    print("DAE of index {} {} in {} time steps, {} fev, {} jev, {} LUdec".format(
-          chosen_index, 'solved'*sol.success+(1-sol.success)*'failed',
+    t_end = pytime.time()
+    print("DAE of index {} {} in {} s, {} time steps, {} fev, {} jev, {} LUdec".format(
+          chosen_index, 'solved'*sol.success+(1-sol.success)*'failed', t_end-t_start,
           sol.t.size, sol.nfev, sol.njev, sol.nlu))
     # print("DAE of index {} {} in {} time steps, {} fev, {} jev, {} LUdec, {} LU solves".format(
     #       chosen_index, 'solved'*sol.success+(1-sol.success)*'failed',
@@ -376,7 +378,7 @@ if 0:
     from tqdm import tqdm
     ani = animation.FuncAnimation(fig, update, frames=tqdm(np.linspace(sol.t[0], sol.t[-1],total_frames)),
                         init_func=init, interval=200, blit=True)
-    ani.save('/tmp/animation_new7.gif', writer='imagemagick', fps=30)
+    ani.save('/tmp/animation_new9.gif', writer='imagemagick', fps=30)
     # writer = animation.writers['ffmpeg'](fps=24, metadata=dict(artist='Me'), bitrate=1800)
     # ani.save('animation.mp4', writer=writer)
   plt.show()
