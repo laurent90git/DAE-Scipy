@@ -25,7 +25,7 @@ from numpy.testing import (assert_, assert_allclose,
                            assert_equal, assert_no_warnings, suppress_warnings)
 
 ## Choice of integration method
-from radauDAE import RadauDAE
+from scipyDAE.radauDAE import RadauDAE
 method=RadauDAE
 rtol=1e-10; atol=1e-10
 

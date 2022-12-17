@@ -5,7 +5,21 @@ This repository is based on Scipy's integrate module. The Radau method implement
 This is done by introducing a mass matrix *M* and solving the following equation:
 > M dX/dt = f(t,X)
 
-Various examples are given:
+To use this package, execute the following command :
+> python setup.py develop
+which will install the package as a development package, i.e. directly referring to the
+You can also install it as a normal package :
+> python setup.py install
+But you loose the ability to modify the code on the fly without reinstalling the package...
+
+To use the modified integrator:
+> from scipyDAE.radauDAE import RadauDAE
+> scipy.integrate.solve_ivp(..., method=RadauDAE)
+
+Refer to the examples and to the documentation for more information.
+
+
+Various test problems are given:
 
 - pendulum (index 3, 2, 1 or 0 DAE)
 

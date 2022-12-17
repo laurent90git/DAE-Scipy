@@ -232,13 +232,14 @@ def generateSytem(chosen_index, theta_0=np.pi/2, theta_dot0=0., r0=1., m=1, g=9.
 
 if __name__=='__main__':
     # Test the pendulum
-    # from scipy.integrate import solve_ivp
     from numpy.testing import (assert_, assert_allclose,
                            assert_equal, assert_no_warnings, suppress_warnings)
     import matplotlib.pyplot as plt
-
-    from radauDAE import RadauDAE
-    from radauDAE import solve_ivp_custom as solve_ivp
+    from scipyDAE.radauDAE import RadauDAE
+    from scipyDAE.radauDAE import solve_ivp_custom as solve_ivp
+    # from scipy.integrate import solve_ivp
+    
+    
     ###### Parameters to play with
     chosen_index = 3 # The index of the DAE formulation
     tf = 10.0        # final time (one oscillation is ~2s long)
@@ -248,7 +249,6 @@ if __name__=='__main__':
     bPrint=False # if True, additional printouts from Radau during the computation
     bDebug=False # sutdy condition number of the iteration matrix
     method=RadauDAE
-
 
     ## Physical parameters for the pendulum
     theta_0=np.pi/6 # initial angle

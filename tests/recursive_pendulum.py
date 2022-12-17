@@ -196,7 +196,7 @@ if __name__=='__main__':
                            assert_equal, assert_no_warnings, suppress_warnings)
     import matplotlib.pyplot as plt
 
-    from radauDAE import RadauDAE
+    from scipyDAE.radauDAE import RadauDAE
     # from radauDAE_subjac import RadauDAE
     ###### Parameters to play with
     chosen_index = 3 # The index of the DAE formulation

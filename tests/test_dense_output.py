@@ -21,7 +21,7 @@ from scipy.sparse import diags
 from scipy.integrate import solve_ivp
 from numpy.testing import (assert_, assert_allclose,
                            assert_equal, assert_no_warnings, suppress_warnings)
-from radauDAE import RadauDAE
+from scipyDAE.radauDAE import RadauDAE
 
 
 #%% Define the DAE system

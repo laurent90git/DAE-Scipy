@@ -12,9 +12,8 @@ https://doi.org/10.1016/0168-9274(95)00013-K
 """
 import numpy as np
 
-from scipy.integrate import solve_ivp#, Radau
-from radauDAE import RadauDAE as Radau
-# from radauDAE_subjac import RadauDAE as Radau
+from scipy.integrate import solve_ivp
+from scipyDAE.radauDAE import RadauDAE
 from scipy.optimize._numdiff import approx_derivative
 
 
@@ -103,7 +102,7 @@ if __name__ == "__main__":
                         rtol=1e0,
                         atol=1e-2,
                         jac=jac,
-                        method=Radau,
+                        method=RadauDAE,
                         first_step=dt,
                         max_step=dt,
                         constant_dt=True,

@@ -55,8 +55,7 @@ from numpy.testing import (assert_, assert_allclose,
 
 
 ## Choice of integration method
-from radauDAE import RadauDAE
-# from radauDAE_subjac import RadauDAE
+from scipyDAE.radauDAE import RadauDAE
 
 method=RadauDAE
 
