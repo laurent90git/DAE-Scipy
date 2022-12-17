@@ -26,53 +26,18 @@ import numpy as np
 import scipy.sparse
 import scipy.optimize._numdiff
 import time as pytime
-
-n_pendulum = 50
-
-n=n_pendulum
-
 g=9.81
 
-## Initial conditions for each pendulum
-theta_0     = np.array([3*np.pi/4 for i in range(n)])
-# theta_0[-1] = np.pi/2
-# theta_0     = np.array([np.pi/2 for i in range(n)])
-# # theta_0     = np.array([0. for i in range(n)])
-# theta_0[-1] = np.pi/3
-theta_dot0  = np.array([0. for i in range(n)]);
 
-if 1: # chord with a mass at the end
-    m_chord = 1.
-    m_final = 1.
-    L_chord = 2.
-    m_node = m_chord / (n_pendulum-1)
-    L_rod  = L_chord / n_pendulum
-
-    r0  = np.array([L_rod for i in range(n)])
-    r0s = r0**2
-    m   = np.array([m_node for i in range(n)])
-    m[-1] = m_final
-else: # also at the middle
-    m_chord  = 1.
-    m_final  = 5.
-    m_middle = 5.
-
-    L_chord = 2.
-    m_node = m_chord / n_pendulum
-    L_rod  = L_chord / n_pendulum
-
-    r0  = np.array([L_rod for i in range(n)])
-    r0s = r0**2
-    m   = np.array([m_node for i in range(n)])
-    m[-1] = m_final
-    m[len(m)//2]=m_middle
 #%% Setup the model based on the chosen formulation
-def generateSytem(n,chosen_index=3):
+def generateSystem(n=50,initial_angle=np.pi/4, chosen_index=3):
     """ Generates the DAE function representing the pendulum with the desired
     index (0 to 3).
         Inputs:
           n: int
             number of pendulums attached in series
+          initial_angle:
+            initial angle of the chord formed by the pendulum (0=vertical, pi/2=horizontal)
           chosen_index: int
             index of the DAE formulation
         Outputs:
@@ -86,7 +51,43 @@ def generateSytem(n,chosen_index=3):
           Xini: initial condition for the system
 
     """
+    
+    ###### Initial condition
+    ## Initial conditions for each pendulum
+    theta_0     = np.array([initial_angle for i in range(n)])
+    # theta_0[-1] = np.pi/2
+    # theta_0     = np.array([np.pi/2 for i in range(n)])
+    # # theta_0     = np.array([0. for i in range(n)])
+    # theta_0[-1] = np.pi/3
+    theta_dot0  = np.array([0. for i in range(n)]);
+    
+    if 1: # chord with a mass at the end
+        m_chord = 1.
+        m_final = 1.
+        L_chord = 2.
+        m_node = m_chord / (n-1)
+        L_rod  = L_chord / n
+    
+        r0  = np.array([L_rod for i in range(n)])
+        r0s = r0**2
+        m   = np.array([m_node for i in range(n)])
+        m[-1] = m_final
+    else: # also at the middle
+        m_chord  = 1.
+        m_final  = 5.
+        m_middle = 5.
+    
+        L_chord = 2.
+        m_node = m_chord / n
+        L_rod  = L_chord / n
+    
+        r0  = np.array([L_rod for i in range(n)])
+        r0s = r0**2
+        m   = np.array([m_node for i in range(n)])
+        m[-1] = m_final
+        m[len(m)//2]=m_middle
 
+    ###### DAE function and Jacobian
     if chosen_index==3:
         def dae_fun(t,X):
           x=X[0::5]; y=X[1::5]; vx=X[2::5]; vy=X[3::5]; lbda=X[4::5]
@@ -181,12 +182,14 @@ def generateSytem(n,chosen_index=3):
     vx0 = np.cumsum( r0*theta_dot0*np.cos(theta_0))
     vy0 = np.cumsum( r0*theta_dot0*np.sin(theta_0))
     lbda0 = np.zeros(n)#(m*r0*theta_dot0**2 +  m*g*np.cos(theta_0))/r0 # equilibrium along the rod's axis
-
+    # the initial value for lbda does not change the solution, since this variable will be readjusted by the solver
 
     # the initial condition should be consistent with the algebraic equations
     Xini =np.vstack((x0, y0, vx0, vy0, lbda0)).reshape((-1,), order='F')
 
-    return dae_fun, jac_dae, sparsity, mass, Xini, var_index
+    T_th = 2*np.pi*np.sqrt(L_chord/g) # theoretical period for a single pendulum of equal length
+    
+    return dae_fun, jac_dae, sparsity, mass, Xini, var_index, T_th, m
 
 #%%
 if __name__=='__main__':
@@ -199,37 +202,19 @@ if __name__=='__main__':
     from scipyDAE.radauDAE import RadauDAE
     # from radauDAE_subjac import RadauDAE
     ###### Parameters to play with
+    n = 50
+    initial_angle = np.pi/4
     chosen_index = 3 # The index of the DAE formulation
-    # tf = 10.0       # final time (one oscillation is ~2s long)
-    rtol=1e-6; atol=rtol # relative and absolute tolerances for time adaptation
+    rtol=1e-5; atol=rtol # relative and absolute tolerances for time adaptation
     bPrint=False # if True, additional printouts from Radau during the computation
     method=RadauDAE
 
-    dae_fun, jac_dae, sparsity, mass, Xini, var_index = generateSytem(n_pendulum, chosen_index)
+    dae_fun, jac_dae, sparsity, mass, Xini, var_index, T_th, m = \
+        generateSystem(n, initial_angle, chosen_index)
 
-    T_th = 2*np.pi*np.sqrt(L_chord/g) # theoretical period for a linear pendulum
-    tf = 2*T_th
-    ##TODO: find the correct lbda by ensuring that constraints are satisfied at=0,
-    ##    --> need to differentiate the cosntraint twice to let lbda appear
-    # def objfun(x):
-    #   X = np.zeros(Xini.shape, dtype=x.dtype)
-    #   X[:] = Xini
-    #   X[4::5] = x # replace lambda
-    #   f = dae_fun(0.,X)
-    #   return np.sum(f[4::5]**2)
-    #
-    # jac_objfun = lambda x: scipy.optimize._numdiff.approx_derivative(
-    #                             fun=objfun,
-    #                             x0=x, method='cs',
-    #                             rel_step=1e-50, f0=None,
-    #                             bounds=(-np.inf, np.inf), sparsity=None,
-    #                             as_linear_operator=False, args=(),
-    #                             kwargs={})
-    #
-    # import scipy.optimize
-    # out = scipy.optimize.minimize(fun=objfun, jac=jac_objfun, x0=np.zeros(n_pendulum), tol=1e-9)
-    jac_dae = None
-
+    tf = 2*T_th # simulate 2 periods
+    # jac_dae = None
+    
     #%% Solve the DAE
     print(f'Solving the index {chosen_index} formulation')
     t_start = pytime.time()
@@ -273,7 +258,7 @@ if __name__=='__main__':
       # jacobian = jac_dae(sol.t[0], sol.y[:,0])
       jacobian = jac_dae(sol.t[-1], sol.y[:,-1])
       plt.spy(jacobian)
-      for i in range(n_pendulum):
+      for i in range(n):
         plt.axhline(i*5-0.5, color='tab:gray', linewidth=0.5)
         plt.axvline(i*5-0.5, color='tab:gray', linewidth=0.5)
       # plt.grid()
@@ -301,7 +286,7 @@ if __name__=='__main__':
 
     #%%
     plt.figure(figsize=(5,5))
-    for i in range(n_pendulum):
+    for i in range(n):
       plt.plot(x[i,:], y[i,:], linestyle='--')
     plt.grid()
 
@@ -309,7 +294,7 @@ if __name__=='__main__':
     plt.plot( np.hstack((0., x[:,-1])), np.hstack((0.,y[:,-1])), color='r')
     plt.plot( np.hstack((0., x[:,0])), np.hstack((0.,y[:,0])), color=[0,0,0])
     plt.scatter(0.,0.,marker='o', color=[0,0,0])
-    for i in range(n_pendulum):
+    for i in range(n):
       for j in [0,-1]:
         plt.scatter(x[i,j],y[i,j],marker='o', color=[0,0,0])
 
@@ -344,12 +329,12 @@ if 0:
 
   lines, = plt.plot([], [], linestyle='-', linewidth=1.5, marker=None, color='tab:blue') # rods
   marker='o'
-  # if n_pendulum<50:
+  # if n<50:
   #     marker='o'
   # else:
   #     marker=None
   points, = plt.plot([],[], marker=marker, linestyle='', color=[0,0,0]) # mass joints
-  # paths  = [plt.plot([],[], alpha=0.2, color='tab:orange')[0] for i in range(n_pendulum)] # paths of the pendulum
+  # paths  = [plt.plot([],[], alpha=0.2, color='tab:orange')[0] for i in range(n)] # paths of the pendulum
   time_template = r'$t = {:.2f}$ s'
   time_text = ax.text(0.05, 0.9, '', transform=ax.transAxes)
 

@@ -221,6 +221,7 @@ class RadauDAE(OdeSolver):
                  max_newton_ite=6, min_factor=0.2, max_factor=10, max_bad_ite=None,
                  var_index=None, scale_residuals=False, scale_newton_norm=False,
                  scale_error=True, zero_algebraic_error=False, bDebug=False,
+                 jacobianRecomputeFactor=1e-3,
                  bAlwaysApply2ndEstimate=True, bUsePredictiveNewtonStoppingCriterion=True,
                  **extraneous):
 
@@ -228,10 +229,11 @@ class RadauDAE(OdeSolver):
         self.MIN_FACTOR = min_factor # Minimum allowed decrease in a step size
         self.MAX_FACTOR = max_factor # Maximum allowed increase in a step size
         self.factor_on_non_convergence = factor_on_non_convergence # Time step decrease when Newton fails
-        self.safety_factor = safety_factor
-        self.bAlwaysApply2ndEstimate = bAlwaysApply2ndEstimate
-        self.bUsePredictiveNewtonStoppingCriterion = bUsePredictiveNewtonStoppingCriterion
-
+        self.safety_factor = safety_factor # safety factor for the determination of a new time step
+        self.bAlwaysApply2ndEstimate = bAlwaysApply2ndEstimate # If True, the L-stabilised error estimate is always used, otherwise it is only use after a rejected step
+        self.bUsePredictiveNewtonStoppingCriterion = bUsePredictiveNewtonStoppingCriterion # If True, the Newton may stop early if the predicted error after all allowed iterations are performed is too large
+        self.jacobianRecomputeFactor = jacobianRecomputeFactor # if convergence rate is lower than this value after a step, the Jacobian is updated
+        
         warn_extraneous(extraneous)
         super().__init__(fun, t0, y0, t_bound, vectorized)
         self.y_old = None
@@ -493,7 +495,9 @@ class RadauDAE(OdeSolver):
                   print('solving system at t={} with dt={}'.format(t,h))
                 if LU_real is None or LU_complex is None:
                   if self.scale_residuals:
-                    # residuals associated with high-index components are scaled (see [3], p97)
+                    # residuals associated with high-index components are scaled
+                    # this may help with the stability of the matrix decomposition
+                    # (see [3], p97)
                     # self.hscale = np.diag(h**(-self.var_index))
                     if issparse(self.I):
                         self.hscale = diags(h**(-np.minimum(1,self.var_index)), offsets=0, format='csc')
@@ -524,8 +528,12 @@ class RadauDAE(OdeSolver):
 
                 converged, n_iter, Z, f_subs, rate = self.solve_collocation_system(
                     t, y, h, Z0, newton_scale, self.newton_tol,
-                    LU_real, LU_complex, self.hscale)
+                    LU_real, LU_complex, residual_scale=self.hscale)
 
+                safety = self.safety_factor * (2 * self.NEWTON_MAXITER + 1) / (2 * self.NEWTON_MAXITER + n_iter)
+                if BPRINT:
+                  print('\tsafety={:.2e}'.format(safety))
+                  
                 if not converged:
                     if BPRINT:
                         print('no convergence at t={} with dt={}'.format(t,h))
@@ -573,14 +581,13 @@ class RadauDAE(OdeSolver):
                 else:
                     error_norm = norm(error / err_scale)
 
-                safety = self.safety_factor * (2 * self.NEWTON_MAXITER + 1) / (2 * self.NEWTON_MAXITER + n_iter)
                 if BPRINT:
                   print('\t1st error estimate: {:.3e}'.format(error_norm))
 
                 if (self.bAlwaysApply2ndEstimate and error_norm > 1) or (rejected and error_norm > 1): # try with stabilised error estimate
                     if BPRINT:
                       print('\t rejected')
-                    error = self.solve_lu(LU_real, self.fun(t, y + error) + self.mass_matrix.dot(ZE))
+                    error = self.solve_lu(LU_real, self.fun(t, y + error) + self.mass_matrix.dot(ZE)) # error is not corrected for algebraic variables
                     self.nlusolve_errorest += 1
                     self.nlusove -= 1
                     if self.zero_algebraic_error:
@@ -596,21 +603,26 @@ class RadauDAE(OdeSolver):
                         print('\t step rejected')
                     if BPRINT and y_new.size<10:
                       print('\terror (scaled)=',error/err_scale)
+                      
                     # TODO: Original Fortran code does something else ?
                     factor = predict_factor(h_abs, h_abs_old,
                                             error_norm, error_norm_old)
+                    if BPRINT:
+                        print('\tfactor={:.2e}'.format(safety))
+                    
                     h_abs *= max(self.MIN_FACTOR, safety * factor)
                     LU_real = None
                     LU_complex = None
                     rejected = True
                     self.nrejct += 1
                 else:
+                    if BPRINT: print('\t step accepted2')
+                    self.naccpt +=1
                     step_accepted = True
 
 	## Step is converged and accepted
         if BPRINT: print('\t step accepted')
-        self.naccpt +=1
-        recompute_jac = jac is not None and n_iter > 2 and rate > 1e-3
+        recompute_jac = jac is not None and n_iter > 2 and rate > self.jacobianRecomputeFactor
 
         if self.constant_dt:
           factor = self.max_step/h_abs # return to the maximum value
