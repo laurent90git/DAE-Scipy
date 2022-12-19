@@ -91,6 +91,11 @@ Created on Mon Nov  2 14:54:33 2020
 """
 import numpy as np
 
+def computeAngle(x,y):
+  theta = np.arctan(-x/y)
+  I = np.where(y>0)[0]
+  theta[I] += np.sign(x[I])*np.pi
+  return theta
 
 #%% Setup the model based on the chosen formulation
 def generateSystem(chosen_index, theta_0=np.pi/2, theta_dot0=0., r0=1., m=1, g=9.81):
@@ -238,8 +243,8 @@ if __name__=='__main__':
     from scipyDAE.radauDAE import RadauDAE
     from scipyDAE.radauDAE import solve_ivp_custom as solve_ivp
     # from scipy.integrate import solve_ivp
-    
-    
+
+
     ###### Parameters to play with
     chosen_index = 3 # The index of the DAE formulation
     tf = 10.0        # final time (one oscillation is ~2s long)
@@ -280,7 +285,7 @@ if __name__=='__main__':
     # recover the time history of each variable
     x=sol.y[0,:]; y=sol.y[1,:]; vx=sol.y[2,:]; vy=sol.y[3,:]; lbda=sol.y[4,:]
     T = lbda * np.sqrt(x**2+y**2)
-    theta= np.arctan(x/y)
+    theta = computeAngle(x,y) #np.arctan(x/y)
 
     #%% Compute true solution (ODE on the angle in polar coordinates)
     def fun_ode(t,X):

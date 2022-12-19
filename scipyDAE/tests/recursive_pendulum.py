@@ -26,6 +26,7 @@ import numpy as np
 import scipy.sparse
 import scipy.optimize._numdiff
 import time as pytime
+from pendulum import computeAngle
 g=9.81
 
 
@@ -51,7 +52,7 @@ def generateSystem(n=50,initial_angle=np.pi/4, chosen_index=3):
           Xini: initial condition for the system
 
     """
-    
+
     ###### Initial condition
     ## Initial conditions for each pendulum
     theta_0     = np.array([initial_angle for i in range(n)])
@@ -60,14 +61,14 @@ def generateSystem(n=50,initial_angle=np.pi/4, chosen_index=3):
     # # theta_0     = np.array([0. for i in range(n)])
     # theta_0[-1] = np.pi/3
     theta_dot0  = np.array([0. for i in range(n)]);
-    
+
     if 1: # chord with a mass at the end
         m_chord = 1.
         m_final = 1.
         L_chord = 2.
         m_node = m_chord / (n-1)
         L_rod  = L_chord / n
-    
+
         r0  = np.array([L_rod for i in range(n)])
         r0s = r0**2
         m   = np.array([m_node for i in range(n)])
@@ -76,11 +77,11 @@ def generateSystem(n=50,initial_angle=np.pi/4, chosen_index=3):
         m_chord  = 1.
         m_final  = 5.
         m_middle = 5.
-    
+
         L_chord = 2.
         m_node = m_chord / n
         L_rod  = L_chord / n
-    
+
         r0  = np.array([L_rod for i in range(n)])
         r0s = r0**2
         m   = np.array([m_node for i in range(n)])
@@ -188,7 +189,7 @@ def generateSystem(n=50,initial_angle=np.pi/4, chosen_index=3):
     Xini =np.vstack((x0, y0, vx0, vy0, lbda0)).reshape((-1,), order='F')
 
     T_th = 2*np.pi*np.sqrt(L_chord/g) # theoretical period for a single pendulum of equal length
-    
+
     return dae_fun, jac_dae, sparsity, mass, Xini, var_index, T_th, m
 
 #%%
@@ -214,7 +215,7 @@ if __name__=='__main__':
 
     tf = 2*T_th # simulate 2 periods
     # jac_dae = None
-    
+
     #%% Solve the DAE
     print(f'Solving the index {chosen_index} formulation')
     t_start = pytime.time()
@@ -248,7 +249,8 @@ if __name__=='__main__':
     dy = np.vstack((y[0,:], np.diff(y,axis=0)))
     r = (dx**2 + dy**2)**0.5
     # theta = np.arctan(dx/dy)
-    theta = np.angle(dx + 1j * dy)
+    theta = computeAngle(dx,dy) #np.angle(dx + 1j * dy)
+
     np.diff(theta, axis=0)*180/np.pi
     length = np.sum(r,axis=0)
 
@@ -276,6 +278,33 @@ if __name__=='__main__':
     plt.grid()
     plt.xlabel('t (s)')
     plt.ylabel('Energy (J)')
+
+    #%% Relative angles
+    # It does not make much sense to use complex numbers, but anyway...
+    plt.figure()
+    # projvec = dx[:-1] + 1j*dy[:-1]
+    # projvec_norm = (projvec.real**2 + projvec.imag**2)**0.5
+    # projvec = projvec / projvec_norm
+
+    # vectors = dx[1:] + 1j*dy[1:]
+    # vectors_norm = (vectors.real**2 + vectors.imag**2)**0.5
+
+    # colinear_part = (vectors.real * projvec.real +  vectors.imag * projvec.imag )* projvec
+    # colinear_part_norm = (colinear_part.real**2 + colinear_part.imag**2)**0.5
+
+    # perpendicular_part = vectors - colinear_part * projvec
+    # perpendicular_part_norm = (perpendicular_part.real**2 + perpendicular_part.imag**2)**0.5
+
+    # assert np.allclose(perpendicular_part_norm**2 + colinear_part_norm**2, vectors_norm**2)
+
+    # angles = computeAngle(x=colinear_part, y=perpendicular_part)
+
+    # plt.plot(t, angles.T)
+    plt.plot(t, np.diff(theta.T,axis=1))
+    plt.grid()
+    plt.xlabel('t (s)')
+    plt.ylabel('angle (rad)')
+    plt.title('Relative angle between successive rods')
 
     #%% plot joint forces
     plt.figure()
