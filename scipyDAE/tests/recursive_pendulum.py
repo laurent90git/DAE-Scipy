@@ -92,14 +92,19 @@ def generateSystem(n=50,initial_angle=np.pi/4, chosen_index=3):
     if chosen_index==3:
         def dae_fun(t,X):
           x=X[0::5]; y=X[1::5]; vx=X[2::5]; vy=X[3::5]; lbda=X[4::5]
-          dt_x = vx
-          dt_y = vy
-          dt_vx = np.zeros_like(x)
-          dt_vy = np.zeros_like(x)
-          constraints = np.zeros_like(x)
+          dXdt = np.empty((5,x.size), order='C', dtype=X.dtype)
+          dt_x, dt_y, dt_vx, dt_vy, constraints = dXdt
 
-          dx = np.hstack((x[0], np.diff(x))) # distances between each node, accounting for the fixed zero-th node
-          dy = np.hstack((y[0], np.diff(y)))
+          dt_x[:] = vx
+          dt_y[:] = vy
+
+          # dx = np.hstack((x[0], np.diff(x))) # distances between each node, accounting for the fixed zero-th node
+          # dy = np.hstack((y[0], np.diff(y)))
+          dx = np.empty_like(x)
+          dy = np.empty_like(x)
+          dx[0]  = x[0]; dx[1:] =  np.diff(x) # distances between each node, accounting for the fixed zero-th node
+          dy[0]  = y[0]; dy[1:] =  np.diff(y) # distances between each node, accounting for the fixed zero-th node
+
           rs  = dx**2 + dy**2
 
           dt_vx[:-1] = (1/m[:-1]) * (+lbda[:-1]*dx[:-1]/rs[:-1] - lbda[1:]*dx[1:]/rs[1:])
@@ -109,8 +114,8 @@ def generateSystem(n=50,initial_angle=np.pi/4, chosen_index=3):
           dt_vy[-1]  = (1/m[-1]) *  (+lbda[-1]*dy[-1]/rs[-1] - m[-1]*g)
 
           # constraints = rs**0.5 - r0s**0.5
-          constraints = rs - r0s
-          return np.vstack((dt_x, dt_y, dt_vx, dt_vy, constraints)).reshape((-1,), order='F')
+          constraints[:] = rs - r0s
+          return dXdt.reshape((-1,), order='F')
 
         diag_mass = np.ones((n*5,))
         var_index = np.zeros((n*5,))
@@ -165,8 +170,10 @@ def generateSystem(n=50,initial_angle=np.pi/4, chosen_index=3):
         # sparsity = None
         jac_dae = lambda t,x: scipy.optimize._numdiff.approx_derivative(
                                     fun=lambda x: dae_fun(t,x),
-                                    x0=x, method='cs',
-                                    rel_step=1e-50, f0=None,
+                                    x0=x, method='2-point',
+                                    rel_step=1e-8, f0=None,
+                                    # x0=x, method='cs',
+                                    # rel_step=1e-50, f0=None,
                                     bounds=(-np.inf, np.inf), sparsity=sparsity,
                                     as_linear_operator=False, args=(),
                                     kwargs={})
@@ -203,7 +210,7 @@ if __name__=='__main__':
     from scipyDAE.radauDAE import RadauDAE
     # from radauDAE_subjac import RadauDAE
     ###### Parameters to play with
-    n = 50
+    n = 1000
     initial_angle = np.pi/4
     chosen_index = 3 # The index of the DAE formulation
     rtol=1e-5; atol=rtol # relative and absolute tolerances for time adaptation
@@ -215,6 +222,27 @@ if __name__=='__main__':
 
     tf = 2*T_th # simulate 2 periods
     # jac_dae = None
+
+    #%%
+    if 0:
+        #%% Initial state, study Jacobian
+        jacfull_fun = lambda t,x: scipy.optimize._numdiff.approx_derivative(
+                            fun=lambda x: dae_fun(t,x),
+                            x0=x, method='2-point',
+                            rel_step=1e-8, f0=None,
+                            bounds=(-np.inf, np.inf), sparsity=None,
+                            kwargs={})
+        jacobian = jacfull_fun(0,Xini+(1e-3+ abs(Xini)*1e-3)*np.random.random(Xini.size))
+
+        dae_fun(0,Xini+(1e-3+ abs(Xini)*1e-3)*np.random.random(Xini.size))
+
+        plt.figure()
+        plt.spy(jacobian)
+        for i in range(n):
+          plt.axhline(i*5-0.5, color='tab:gray', linewidth=0.5)
+          plt.axvline(i*5-0.5, color='tab:gray', linewidth=0.5)
+        # plt.grid()
+        plt.title('Jacobian of the DAE function at perturbed initial state')
 
     #%% Solve the DAE
     print(f'Solving the index {chosen_index} formulation')
