@@ -21,6 +21,12 @@ MU_COMPLEX = (3 + 0.5 * (3 ** (1 / 3) - 3 ** (2 / 3))
               - 0.5j * (3 ** (5 / 6) + 3 ** (7 / 6)))
 BPRINT = False
 
+CODE_NON_CONV=5
+CODE_JACOBIAN_UPDATE=-11
+CODE_FACTORISATION=-10
+CODE_ACCEPTED=0
+CODE_REJECTED=2
+
 # These are transformation matrices.
 T = np.array([
     [0.09443876248897524, -0.14125529502095421, 0.03002919410514742],
@@ -90,6 +96,28 @@ def predict_factor(h_abs, h_abs_old, error_norm, error_norm_old):
 
     return factor
 
+from tqdm import tqdm
+class progress_wrapper():
+    def __init__(self, npoints=1000):
+        self.progress = 0
+        self.npoints = npoints
+        self.pbar = tqdm(range(npoints), bar_format='{l_bar}{bar}| {elapsed}>{remaining}{postfix}')
+        # self.nupdate = 0
+        # self.update(0)
+
+    def update(self, nstep, t, dt, progress):
+        """ Progress should be in [0,1] """
+        gap = np.floor(self.npoints * progress) - np.floor(self.npoints * self.progress)
+        if gap >= 1: # update every one percent
+            self.pbar.update(gap)
+            self.pbar.postfix = f'nt={nstep}, t={t:.2e}, dt={dt:.2e}'
+            # self.pbar.n = np.floor(self.npoints * progress)
+            self.pbar.refresh()
+            self.progress = progress
+
+    def finalise(self):
+        if self.progress<1:
+           self.update(self.npoints)
 
 class RadauDAE(OdeSolver):
     """Implicit Runge-Kutta method of Radau IIA family of order 5.
@@ -223,7 +251,12 @@ class RadauDAE(OdeSolver):
                  scale_error=True, zero_algebraic_error=False, bDebug=False,
                  jacobianRecomputeFactor=1e-3,
                  bAlwaysApply2ndEstimate=True, bUsePredictiveNewtonStoppingCriterion=True,
+                 bReport=False,
                  **extraneous):
+
+        warn_extraneous(extraneous)
+        super().__init__(fun, t0, y0, t_bound, vectorized)
+        self.t0 = t0
 
         self.NEWTON_MAXITER = max_newton_ite # Maximum number of Newton iterations
         self.MIN_FACTOR = min_factor # Minimum allowed decrease in a step size
@@ -233,9 +266,13 @@ class RadauDAE(OdeSolver):
         self.bAlwaysApply2ndEstimate = bAlwaysApply2ndEstimate # If True, the L-stabilised error estimate is always used, otherwise it is only use after a rejected step
         self.bUsePredictiveNewtonStoppingCriterion = bUsePredictiveNewtonStoppingCriterion # If True, the Newton may stop early if the predicted error after all allowed iterations are performed is too large
         self.jacobianRecomputeFactor = jacobianRecomputeFactor # if convergence rate is lower than this value after a step, the Jacobian is updated
+        self.bReport = bReport # if True, details (error, Newton iterations) of each step are stored
         
-        warn_extraneous(extraneous)
-        super().__init__(fun, t0, y0, t_bound, vectorized)
+        if self.bReport:
+          self.reports={"t":[],"dt":[],"code":[],'newton_iterations':[], 'bad_iterations':[],
+                   "err1":[], "err2":[], "errors1":[], "errors2":[], "error_scale": []}
+          
+
         self.y_old = None
         self.max_step = validate_max_step(max_step)
         self.rtol, self.atol = validate_tol(rtol, atol, self.n)
@@ -268,6 +305,8 @@ class RadauDAE(OdeSolver):
         self.nlusove=0
 
         self.bPrintProgress = bPrintProgress
+        if self.bPrintProgress:
+          self.progressBar = progress_wrapper()
         self.bDebug = bDebug
         global BPRINT
         BPRINT=bPrint
@@ -351,6 +390,29 @@ class RadauDAE(OdeSolver):
         if self.bDebug:
             self.info = {'cond':{'LU_real':[], 'LU_complex':[], 't':[], 'h':[]}}
 
+    def _report(self,t,dt,code=None,newt=-1,nbad=-1,err1=-1,err2=-1,
+                errors1=None, errors2=None, err_scale=None):
+      if not self.bReport:
+        return
+      self.reports['t'].append(t)
+      self.reports['dt'].append(dt)
+      self.reports['code'].append(code)
+      self.reports['newton_iterations'].append(newt)
+      self.reports['bad_iterations'].append(nbad)
+      self.reports['err1'].append(err1)
+      self.reports['err2'].append(err2)
+      if errors1 is None:
+        errors1 = np.nan * np.zeros_like(self.y)
+      if errors2 is None:
+        errors2 = np.nan * np.zeros_like(self.y)
+      if err_scale is None:
+        err_scale = np.nan * np.zeros_like(self.y)
+      self.reports['errors1'].append(errors1)
+      self.reports['errors2'].append(errors2)
+      self.reports['error_scale'].append(err_scale)
+        
+          
+          
     def _validate_mass_matrix(self, mass_matrix):
         if mass_matrix is None:
             M = self.I
@@ -507,6 +569,7 @@ class RadauDAE(OdeSolver):
                   try:
                       if BPRINT:
                           print('\tLU-decomposition of system Jacobian')
+                      self._report(t=t,dt=h,code=CODE_FACTORISATION)
                       LU_real    = self.lu( self.hscale @ (MU_REAL    / h * self.mass_matrix - J) )
                       LU_complex = self.lu( self.hscale @ (MU_COMPLEX / h * self.mass_matrix - J) )
                       self.nlu -= 1 # to match Fortran
@@ -526,7 +589,7 @@ class RadauDAE(OdeSolver):
                       print('\tcond(LU_real)    = {:.3e}'.format( self.info['cond']['LU_real'][-1] ))
                       print('\tcond(LU_complex) = {:.3e}'.format( self.info['cond']['LU_complex'][-1]  ))
 
-                converged, n_iter, Z, f_subs, rate = self.solve_collocation_system(
+                converged, n_iter, n_bad, Z, f_subs, rate = self.solve_collocation_system(
                     t, y, h, Z0, newton_scale, self.newton_tol,
                     LU_real, LU_complex, residual_scale=self.hscale)
 
@@ -543,6 +606,7 @@ class RadauDAE(OdeSolver):
                         break
 
                     J = self.jac(t, y, f)
+                    self._report(t=t,dt=h,code=CODE_JACOBIAN_UPDATE)
                     current_jac = True
                     LU_real = None
                     LU_complex = None
@@ -552,6 +616,7 @@ class RadauDAE(OdeSolver):
                 if BPRINT:
                    print('   --> dt will be reduced')
                 self.nfailed += 1
+                self._report(t=t,dt=h,code=CODE_NON_CONV,newt=n_iter,nbad=n_bad)
                 h_abs *= self.factor_on_non_convergence
                 LU_real = None
                 LU_complex = None
@@ -566,6 +631,9 @@ class RadauDAE(OdeSolver):
                 step_accepted = True
                 error_norm = 0.
             else:
+                err1, err2 = np.nan, np.nan
+                errors1, errors2 = None, None
+                
                 ZE = Z.T.dot(E) / h
                 err_scale = atol + np.maximum(np.abs(y), np.abs(y_new)) * rtol
                 if self.scale_error:
@@ -573,6 +641,7 @@ class RadauDAE(OdeSolver):
 
                 # see [1], chapter IV.8, page 127
                 error = self.solve_lu(LU_real, f + self.mass_matrix.dot(ZE))
+                errors1 = error / err_scale
                 self.nlusolve_errorest += 1
                 self.nlusove -= 1
                 if self.zero_algebraic_error:
@@ -580,7 +649,7 @@ class RadauDAE(OdeSolver):
                     error_norm = np.linalg.norm(error / err_scale) / (n - self.nvars_algebraic) ** 0.5
                 else:
                     error_norm = norm(error / err_scale)
-
+                err1=error_norm
                 if BPRINT:
                   print('\t1st error estimate: {:.3e}'.format(error_norm))
 
@@ -588,6 +657,7 @@ class RadauDAE(OdeSolver):
                     if BPRINT:
                       print('\t rejected')
                     error = self.solve_lu(LU_real, self.fun(t, y + error) + self.mass_matrix.dot(ZE)) # error is not corrected for algebraic variables
+                    errors2 = error / err_scale
                     self.nlusolve_errorest += 1
                     self.nlusove -= 1
                     if self.zero_algebraic_error:
@@ -595,6 +665,7 @@ class RadauDAE(OdeSolver):
                         error_norm = np.linalg.norm(error / err_scale) / (n - self.nvars_algebraic) ** 0.5
                     else:
                         error_norm = norm(error / err_scale)
+                    err2=error_norm
                     if BPRINT:
                       print('\t2nd error estimate: {:.3e}'.format(error_norm))
 
@@ -604,6 +675,9 @@ class RadauDAE(OdeSolver):
                     if BPRINT and y_new.size<10:
                       print('\terror (scaled)=',error/err_scale)
                       
+                    self._report(t=t,dt=h,code=CODE_REJECTED,newt=n_iter,nbad=n_bad,
+                                 err1=err1, err2=err2, errors1=errors1, errors2=errors2, err_scale=err_scale)
+
                     # TODO: Original Fortran code does something else ?
                     factor = predict_factor(h_abs, h_abs_old,
                                             error_norm, error_norm_old)
@@ -617,6 +691,8 @@ class RadauDAE(OdeSolver):
                     self.nrejct += 1
                 else:
                     if BPRINT: print('\t step accepted2')
+                    self._report(t=t,dt=h,code=CODE_ACCEPTED,newt=n_iter,nbad=n_bad,
+                                 err1=err1, err2=err2, errors1=errors1, errors2=errors2, err_scale=err_scale)
                     self.naccpt +=1
                     step_accepted = True
 
@@ -666,7 +742,10 @@ class RadauDAE(OdeSolver):
         self.sol = self._compute_dense_output()
 
         if self.bPrintProgress:
-          print('t=',t)
+          # print('t=',t)
+          self.progressBar.update(self.nstep, t_new, self.h_abs_old, (t_new-self.t0)/(self.t_bound-self.t0) )
+          # also display current time
+
         return step_accepted, message
 
     def solve_collocation_system(self, t, y, h, Z0, norm_scale, tol,
@@ -823,7 +902,7 @@ class RadauDAE(OdeSolver):
             else:
                 print('\t\tstep failed')
 
-        return converged, k + 1, Z, F, rate
+        return converged, k + 1, consecutive_bad_iterations, Z, F, rate
 
     def _compute_dense_output(self):
         Q = np.dot(self.Z.T, P)
@@ -860,15 +939,19 @@ class RadauDenseOutput(DenseOutput):
 
 
 
-
+MESSAGES = {0: "The solver successfully reached the end of the integration interval.",
+            1: "A termination event occurred.",
+            2: "Too many time steps have been performed",
+            3: "Integration has been interrupted by the user"}
 def solve_ivp_custom(fun, t_span, y0, method=RadauDAE, t_eval=None, dense_output=False,
               events=None, vectorized=False, args=None, return_substeps=False,
+              nmax_step=np.inf,
               **options):
     """Solve an initial value problem for a system of ODEs.
     Custom version, useful for substep export
     """
     from scipy.integrate._ivp.ivp import prepare_events, find_active_events, handle_events
-    from scipy.integrate._ivp.ivp import inspect, METHODS, MESSAGES
+    from scipy.integrate._ivp.ivp import inspect, METHODS#, MESSAGES
     from scipy.integrate._ivp.ivp import OdeSolver, OdeSolution, OdeResult
     if method not in METHODS and not (
             inspect.isclass(method) and issubclass(method, OdeSolver)):
@@ -945,82 +1028,91 @@ def solve_ivp_custom(fun, t_span, y0, method=RadauDAE, t_eval=None, dense_output
         y_events = None
 
     status = None
-    while status is None:
-        message = solver.step()
-
-        if solver.status == 'finished':
-            status = 0
-        elif solver.status == 'failed':
-            status = -1
+    nsteps=0
+    try:
+      while status is None:
+          nsteps+=1
+          if (nsteps>nmax_step):
+            print('\tToo many steps')
+            status=2
             break
-
-        t_old = solver.t_old
-        t = solver.t
-        y = solver.y
-
-        if return_substeps:
-            tres=solver.t_substeps
-            yres=solver.y_substeps
-            fres=solver.f_substeps
-            assert tres[-1]==t
-            assert np.all(yres[-1]==y)
-
-        if dense_output:
-            sol = solver.dense_output()
-            interpolants.append(sol)
-        else:
-            sol = None
-
-        if events is not None:
-            g_new = [event(t, y) for event in events]
-            active_events = find_active_events(g, g_new, event_dir)
-            if active_events.size > 0:
-                if sol is None:
-                    sol = solver.dense_output()
-                print('SCIPY:solve_ivp: solving for precise event occurence')
-                root_indices, roots, terminate = handle_events(
-                    sol, events, active_events, is_terminal, t_old, t)
-
-                for e, te in zip(root_indices, roots):
-                    t_events[e].append(te)
-                    y_events[e].append(sol(te))
-
-                if terminate:
-                    status = 1
-                    t = roots[-1]
-                    y = sol(t)
-
-            g = g_new
-
-        if return_substeps:
-            tsub.extend(tres)
-            ysub.extend(yres)
-            fsub.extend(fres)
-        if t_eval is None:
-            ts.append(t)
-            ys.append(y)
-        else:
-            # The value in t_eval equal to t will be included.
-            if solver.direction > 0:
-                t_eval_i_new = np.searchsorted(t_eval, t, side='right')
-                t_eval_step = t_eval[t_eval_i:t_eval_i_new]
-            else:
-                t_eval_i_new = np.searchsorted(t_eval, t, side='left')
-                # It has to be done with two slice operations, because
-                # you can't slice to 0th element inclusive using backward
-                # slicing.
-                t_eval_step = t_eval[t_eval_i_new:t_eval_i][::-1]
-
-            if t_eval_step.size > 0:
-                if sol is None:
-                    sol = solver.dense_output()
-                ts.append(t_eval_step)
-                ys.append(sol(t_eval_step))
-                t_eval_i = t_eval_i_new
-
-        if t_eval is not None and dense_output:
-            ti.append(t)
-
+          message = solver.step()
+  
+          if solver.status == 'finished':
+              status = 0
+          elif solver.status == 'failed':
+              status = -1
+              break
+  
+          t_old = solver.t_old
+          t = solver.t
+          y = solver.y
+  
+          if return_substeps:
+              tres=solver.t_substeps
+              yres=solver.y_substeps
+              fres=solver.f_substeps
+              assert tres[-1]==t
+              assert np.all(yres[-1]==y)
+  
+          if dense_output:
+              sol = solver.dense_output()
+              interpolants.append(sol)
+          else:
+              sol = None
+  
+          if events is not None:
+              g_new = [event(t, y) for event in events]
+              active_events = find_active_events(g, g_new, event_dir)
+              if active_events.size > 0:
+                  if sol is None:
+                      sol = solver.dense_output()
+                  print('SCIPY:solve_ivp: solving for precise event occurence')
+                  root_indices, roots, terminate = handle_events(
+                      sol, events, active_events, is_terminal, t_old, t)
+  
+                  for e, te in zip(root_indices, roots):
+                      t_events[e].append(te)
+                      y_events[e].append(sol(te))
+  
+                  if terminate:
+                      status = 1
+                      t = roots[-1]
+                      y = sol(t)
+  
+              g = g_new
+  
+          if return_substeps:
+              tsub.extend(tres)
+              ysub.extend(yres)
+              fsub.extend(fres)
+          if t_eval is None:
+              ts.append(t)
+              ys.append(y)
+          else:
+              # The value in t_eval equal to t will be included.
+              if solver.direction > 0:
+                  t_eval_i_new = np.searchsorted(t_eval, t, side='right')
+                  t_eval_step = t_eval[t_eval_i:t_eval_i_new]
+              else:
+                  t_eval_i_new = np.searchsorted(t_eval, t, side='left')
+                  # It has to be done with two slice operations, because
+                  # you can't slice to 0th element inclusive using backward
+                  # slicing.
+                  t_eval_step = t_eval[t_eval_i_new:t_eval_i][::-1]
+  
+              if t_eval_step.size > 0:
+                  if sol is None:
+                      sol = solver.dense_output()
+                  ts.append(t_eval_step)
+                  ys.append(sol(t_eval_step))
+                  t_eval_i = t_eval_i_new
+  
+          if t_eval is not None and dense_output:
+              ti.append(t)
+    except KeyboardInterrupt:
+      status=3
+      
     message = MESSAGES.get(status, message)
 
     if t_events is not None:

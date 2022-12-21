@@ -162,27 +162,9 @@ def generateSystem(n=50,initial_angle=np.pi/4, chosen_index=3):
     else:
       raise Exception('Only index 3 is implemented')
 
-    # alternatively, define the Jacobian via finite-differences, via complex-step
-    # to ensure machine accuracy
-    if jac_dae is None:
-        sparsity = scipy.sparse.diags(diagonals=[np.ones(n*5-abs(i)) for i in range(-10,10)], offsets=[i for i in range(-10,10)],
-                                      format='csc')
-        # sparsity = None
-        jac_dae = lambda t,x: scipy.optimize._numdiff.approx_derivative(
-                                    fun=lambda x: dae_fun(t,x),
-                                    x0=x, method='2-point',
-                                    rel_step=1e-8, f0=None,
-                                    # x0=x, method='cs',
-                                    # rel_step=1e-50, f0=None,
-                                    bounds=(-np.inf, np.inf), sparsity=sparsity,
-                                    as_linear_operator=False, args=(),
-                                    kwargs={})
+    sparsity = scipy.sparse.diags(diagonals=[np.ones(n*5-abs(i)) for i in range(-10,10)], offsets=[i for i in range(-10,10)],
+                                  format='csc')
 
-    ## Otherwise, the Radau solver uses its own routine to estimate the Jacobian, however the
-    # original Scipy routine is only adapted to ODEs and may fail at correctly
-    # determining the Jacobian because of it would chosse finite-difference step
-    # sizes too small with respect to the problem variables (<1e-16 in relative).
-    # jac_dae = None
 
     ## Initial condition (pendulum at an angle)
     x0 =  np.cumsum( r0*np.sin(theta_0))
@@ -202,7 +184,8 @@ def generateSystem(n=50,initial_angle=np.pi/4, chosen_index=3):
 #%%
 if __name__=='__main__':
     # Test the pendulum
-    from scipy.integrate import solve_ivp
+    # from scipy.integrate import solve_ivp
+    from scipyDAE.radauDAE import solve_ivp_custom as solve_ivp
     from numpy.testing import (assert_, assert_allclose,
                            assert_equal, assert_no_warnings, suppress_warnings)
     import matplotlib.pyplot as plt
@@ -211,7 +194,7 @@ if __name__=='__main__':
     # from radauDAE_subjac import RadauDAE
     ###### Parameters to play with
     n = 1000
-    initial_angle = np.pi/4
+    initial_angle = 2*np.pi/4
     chosen_index = 3 # The index of the DAE formulation
     rtol=1e-5; atol=rtol # relative and absolute tolerances for time adaptation
     bPrint=False # if True, additional printouts from Radau during the computation
@@ -251,14 +234,15 @@ if __name__=='__main__':
                     rtol=rtol, atol=atol, jac=jac_dae, jac_sparsity=sparsity,
                     method=method, vectorized=False, first_step=1e-3, dense_output=True,
                     mass_matrix=mass, bPrint=bPrint, bPrintProgress=True,
-                    max_newton_ite=15, min_factor=0.2, max_factor=10,
+                    max_newton_ite=7, min_factor=0.2, max_factor=10,
                     var_index=var_index,
                     # newton_tol=1e-4,
                     scale_residuals = True,
                     scale_newton_norm = True,
                     scale_error = True,
                     zero_algebraic_error = False,
-                    max_bad_ite=1,
+                    max_bad_ite=2,
+                    nmax_step=10000,
                     )
     t_end = pytime.time()
     print("DAE of index {} {} in {} s, {} time steps, {} fev, {} jev, {} LUdec".format(
@@ -420,7 +404,7 @@ if 0:
     from tqdm import tqdm
     ani = animation.FuncAnimation(fig, update, frames=tqdm(np.linspace(sol.t[0], sol.t[-1],total_frames)),
                         init_func=init, interval=200, blit=True)
-    ani.save('/tmp/animation_new9.gif', writer='imagemagick', fps=30)
+    ani.save('animation_new11.gif', writer='imagemagick', fps=30)
     # writer = animation.writers['ffmpeg'](fps=24, metadata=dict(artist='Me'), bitrate=1800)
     # ani.save('animation.mp4', writer=writer)
   plt.show()
