@@ -49,7 +49,7 @@ P = np.array([
 
 
 
-def predict_factor(h_abs, h_abs_old, error_norm, error_norm_old):
+def predict_factor(h_abs, h_abs_old, error_norm, error_norm_old, bUsePredictiveController):
     """Predict by which factor to increase/decrease the step size.
 
     The algorithm is described in [1]_.
@@ -78,7 +78,9 @@ def predict_factor(h_abs, h_abs_old, error_norm, error_norm_old):
     .. [1] E. Hairer, S. P. Norsett G. Wanner, "Solving Ordinary Differential
            Equations II: Stiff and Differential-Algebraic Problems", Sec. IV.8.
     """
-    if error_norm_old is None or h_abs_old is None or error_norm == 0:
+    if not bUsePredictiveController:
+        multiplier=1
+    elif error_norm_old is None or h_abs_old is None or error_norm == 0:
         multiplier = 1
     else:
         multiplier = h_abs / h_abs_old * (error_norm_old / error_norm) ** 0.25
@@ -86,7 +88,6 @@ def predict_factor(h_abs, h_abs_old, error_norm, error_norm_old):
           # print('error_norm_old={:.2e}, error_norm={:.2e}'.format(error_norm_old,error_norm))
           print('\terr_np1 / err_n = {:.2e}'.format(error_norm / error_norm_old))
           print('\th_np1   / h_n   = {:.2e}'.format(h_abs / h_abs_old))
-
 
     with np.errstate(divide='ignore'):
         factor = min(1, multiplier) * error_norm ** -0.25
@@ -114,10 +115,13 @@ class progress_wrapper():
             # self.pbar.n = np.floor(self.npoints * progress)
             self.pbar.refresh()
             self.progress = progress
+        if progress==1:
+          self.finalise()
 
     def finalise(self):
         if self.progress<1:
-           self.update(self.npoints)
+           self.pbar.update(self.npoints)
+        self.pbar.close()
 
 class RadauDAE(OdeSolver):
     """Implicit Runge-Kutta method of Radau IIA family of order 5.
@@ -250,7 +254,9 @@ class RadauDAE(OdeSolver):
                  var_index=None, scale_residuals=False, scale_newton_norm=False,
                  scale_error=True, zero_algebraic_error=False, bDebug=False,
                  jacobianRecomputeFactor=1e-3,
-                 bAlwaysApply2ndEstimate=True, bUsePredictiveNewtonStoppingCriterion=True,
+                 bAlwaysApply2ndEstimate=True, bUsePredictiveController=True,
+                 bUsePredictiveNewtonStoppingCriterion=True,
+                 bUseExtrapolatedGuess=True,
                  bReport=False,
                  **extraneous):
 
@@ -265,6 +271,8 @@ class RadauDAE(OdeSolver):
         self.safety_factor = safety_factor # safety factor for the determination of a new time step
         self.bAlwaysApply2ndEstimate = bAlwaysApply2ndEstimate # If True, the L-stabilised error estimate is always used, otherwise it is only use after a rejected step
         self.bUsePredictiveNewtonStoppingCriterion = bUsePredictiveNewtonStoppingCriterion # If True, the Newton may stop early if the predicted error after all allowed iterations are performed is too large
+        self.bUseExtrapolatedGuess=bUseExtrapolatedGuess # if True, the Newton is initialised with an extrapolated dense output
+        self.bUsePredictiveController = bUsePredictiveController # If True, adaptive time step controller is used
         self.jacobianRecomputeFactor = jacobianRecomputeFactor # if convergence rate is lower than this value after a step, the Jacobian is updated
         self.bReport = bReport # if True, details (error, Newton iterations) of each step are stored
         
@@ -302,7 +310,6 @@ class RadauDAE(OdeSolver):
         self.jac_factor = None
         self.jac, self.J = self._validate_jac(jac, jac_sparsity)
 
-        self.nlusove=0
 
         self.bPrintProgress = bPrintProgress
         if self.bPrintProgress:
@@ -318,6 +325,7 @@ class RadauDAE(OdeSolver):
             return zzzjac(t,y,f)
           self.jac = debugJacprint
 
+        self.nlusolve=0
         self.nlusolve_errorest = 0
         self.nstep = 0
         self.naccpt = 0
@@ -329,7 +337,7 @@ class RadauDAE(OdeSolver):
                 return splu(A)
 
             def solve_lu(LU, b):
-                self.nlusove+=1
+                self.nlusolve+=1
                 return LU.solve(b)
 
             I = eye(self.n, format='csc')
@@ -339,7 +347,7 @@ class RadauDAE(OdeSolver):
                 return lu_factor(A, overwrite_a=True)
 
             def solve_lu(LU, b):
-                self.nlusove+=1
+                self.nlusolve+=1
                 return lu_solve(LU, b, overwrite_b=True)
 
             I = np.identity(self.n)
@@ -542,7 +550,7 @@ class RadauDAE(OdeSolver):
             h_abs = np.abs(h)
 
             # initial solution for the Newton solve
-            if self.sol is None:
+            if (self.sol is None) or not self.bUseExtrapolatedGuess:
                 Z0 = np.zeros((3, y.shape[0]))
             else:
                 Z0 = self.sol(t + h * C).T - y  # extrapolate using previous dense output
@@ -565,11 +573,10 @@ class RadauDAE(OdeSolver):
                         self.hscale = diags(h**(-np.minimum(1,self.var_index)), offsets=0, format='csc')
                     else:
                         self.hscale = np.diag(h**(-np.minimum(1,self.var_index))) # only by h or 1
-                    #TODO: sparse implementation
                   try:
                       if BPRINT:
                           print('\tLU-decomposition of system Jacobian')
-                      self._report(t=t,dt=h,code=CODE_FACTORISATION)
+                      if self.bReport: self._report(t=t,dt=h,code=CODE_FACTORISATION)
                       LU_real    = self.lu( self.hscale @ (MU_REAL    / h * self.mass_matrix - J) )
                       LU_complex = self.lu( self.hscale @ (MU_COMPLEX / h * self.mass_matrix - J) )
                       self.nlu -= 1 # to match Fortran
@@ -606,7 +613,7 @@ class RadauDAE(OdeSolver):
                         break
 
                     J = self.jac(t, y, f)
-                    self._report(t=t,dt=h,code=CODE_JACOBIAN_UPDATE)
+                    if self.bReport: self._report(t=t,dt=h,code=CODE_JACOBIAN_UPDATE)
                     current_jac = True
                     LU_real = None
                     LU_complex = None
@@ -616,7 +623,7 @@ class RadauDAE(OdeSolver):
                 if BPRINT:
                    print('   --> dt will be reduced')
                 self.nfailed += 1
-                self._report(t=t,dt=h,code=CODE_NON_CONV,newt=n_iter,nbad=n_bad)
+                if self.bReport: self._report(t=t,dt=h,code=CODE_NON_CONV,newt=n_iter,nbad=n_bad)
                 h_abs *= self.factor_on_non_convergence
                 LU_real = None
                 LU_complex = None
@@ -643,7 +650,7 @@ class RadauDAE(OdeSolver):
                 error = self.solve_lu(LU_real, f + self.mass_matrix.dot(ZE))
                 errors1 = error / err_scale
                 self.nlusolve_errorest += 1
-                self.nlusove -= 1
+                self.nlusolve -= 1
                 if self.zero_algebraic_error:
                     error[ self.index_algebraic_vars ] = 0.
                     error_norm = np.linalg.norm(error / err_scale) / (n - self.nvars_algebraic) ** 0.5
@@ -659,7 +666,7 @@ class RadauDAE(OdeSolver):
                     error = self.solve_lu(LU_real, self.fun(t, y + error) + self.mass_matrix.dot(ZE)) # error is not corrected for algebraic variables
                     errors2 = error / err_scale
                     self.nlusolve_errorest += 1
-                    self.nlusove -= 1
+                    self.nlusolve -= 1
                     if self.zero_algebraic_error:
                         error[ self.index_algebraic_vars ] = 0.
                         error_norm = np.linalg.norm(error / err_scale) / (n - self.nvars_algebraic) ** 0.5
@@ -675,12 +682,13 @@ class RadauDAE(OdeSolver):
                     if BPRINT and y_new.size<10:
                       print('\terror (scaled)=',error/err_scale)
                       
-                    self._report(t=t,dt=h,code=CODE_REJECTED,newt=n_iter,nbad=n_bad,
+                    if self.bReport: self._report(t=t,dt=h,code=CODE_REJECTED,newt=n_iter,nbad=n_bad,
                                  err1=err1, err2=err2, errors1=errors1, errors2=errors2, err_scale=err_scale)
 
                     # TODO: Original Fortran code does something else ?
                     factor = predict_factor(h_abs, h_abs_old,
-                                            error_norm, error_norm_old)
+                                            error_norm, error_norm_old,
+                                            self.bUsePredictiveController)
                     if BPRINT:
                         print('\tfactor={:.2e}'.format(safety))
                     
@@ -691,7 +699,7 @@ class RadauDAE(OdeSolver):
                     self.nrejct += 1
                 else:
                     if BPRINT: print('\t step accepted2')
-                    self._report(t=t,dt=h,code=CODE_ACCEPTED,newt=n_iter,nbad=n_bad,
+                    if self.bReport: self._report(t=t,dt=h,code=CODE_ACCEPTED,newt=n_iter,nbad=n_bad,
                                  err1=err1, err2=err2, errors1=errors1, errors2=errors2, err_scale=err_scale)
                     self.naccpt +=1
                     step_accepted = True
@@ -703,7 +711,8 @@ class RadauDAE(OdeSolver):
         if self.constant_dt:
           factor = self.max_step/h_abs # return to the maximum value
         else:
-          factor = predict_factor(h_abs, h_abs_old, error_norm, error_norm_old)
+          factor = predict_factor(h_abs, h_abs_old, error_norm, error_norm_old,
+                                  self.bUsePredictiveController)
           factor = min(self.MAX_FACTOR, safety * factor)
 
         if not recompute_jac and factor < 1.2:
@@ -798,7 +807,7 @@ class RadauDAE(OdeSolver):
         dW = np.empty_like(W)
         converged = False
         rate = None
-        consecutive_bad_iterations = 0
+        nbad_iter = 0
         if BPRINT: print('Newton increment scale =', norm_scale)
 
         for k in range(self.NEWTON_MAXITER):
@@ -806,7 +815,6 @@ class RadauDAE(OdeSolver):
               print('\titer {}/{}'.format(k,self.NEWTON_MAXITER))
             for i in range(3):
                 F[i] = self.fun(t + ch[i], y + Z[i])
-            # TODO: could use vectorised fun (beware of function evaluation count)
 
             if not np.all(np.isfinite(F)):
                 if BPRINT:
@@ -835,7 +843,7 @@ class RadauDAE(OdeSolver):
             # compute Newton increment
             dW_real    = self.solve_lu(LU_real,    f_real)
             dW_complex = self.solve_lu(LU_complex, f_complex)
-            self.nlusove -= 1 # to match the original Fortran code
+            self.nlusolve -= 1 # to match the original Fortran code
 
             dW[0] = dW_real
             dW[1] = dW_complex.real
@@ -870,11 +878,11 @@ class RadauDAE(OdeSolver):
                     if BPRINT:
                         print('\t\tNewton loop diverges')
                     if rate<100:
-                        if consecutive_bad_iterations<self.NMAX_BAD:
+                        if nbad_iter<self.NMAX_BAD:
                             # we accept a few number of bad iterations, which may be necessary
                             if BPRINT:
                                 print('\t\tbad iteration (rate>1)')
-                            consecutive_bad_iterations+=1
+                            nbad_iter+=1
                             continue
                     break
                 if dW_true < tol:
@@ -886,8 +894,8 @@ class RadauDAE(OdeSolver):
                     # Newton will not converge in the allowed number of iterations
                     if BPRINT:
                       print('\t\t--> ||dW**|| > tol={:.2e}'.format(tol))
-                    if consecutive_bad_iterations<self.NMAX_BAD:
-                        consecutive_bad_iterations+=1
+                    if nbad_iter<self.NMAX_BAD:
+                        nbad_iter+=1
                         if BPRINT:
                             print('\t\t/!\ bad iteration (||dW**|| too large)')
                         continue
@@ -902,7 +910,7 @@ class RadauDAE(OdeSolver):
             else:
                 print('\t\tstep failed')
 
-        return converged, k + 1, consecutive_bad_iterations, Z, F, rate
+        return converged, k + 1, nbad_iter, Z, F, rate
 
     def _compute_dense_output(self):
         Q = np.dot(self.Z.T, P)

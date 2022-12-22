@@ -26,7 +26,7 @@ import numpy as np
 import scipy.sparse
 import scipy.optimize._numdiff
 import time as pytime
-from pendulum import computeAngle
+from scipyDAE.tests.pendulum import computeAngle
 g=9.81
 
 
@@ -194,7 +194,7 @@ if __name__=='__main__':
     # from radauDAE_subjac import RadauDAE
     ###### Parameters to play with
     n = 1000
-    initial_angle = 2*np.pi/4
+    initial_angle = np.pi/4
     chosen_index = 3 # The index of the DAE formulation
     rtol=1e-5; atol=rtol # relative and absolute tolerances for time adaptation
     bPrint=False # if True, additional printouts from Radau during the computation
@@ -404,7 +404,7 @@ if 0:
     from tqdm import tqdm
     ani = animation.FuncAnimation(fig, update, frames=tqdm(np.linspace(sol.t[0], sol.t[-1],total_frames)),
                         init_func=init, interval=200, blit=True)
-    ani.save('animation_new11.gif', writer='imagemagick', fps=30)
+    ani.save('animation_new12.gif', writer='imagemagick', fps=30)
     # writer = animation.writers['ffmpeg'](fps=24, metadata=dict(artist='Me'), bitrate=1800)
     # ani.save('animation.mp4', writer=writer)
   plt.show()
