@@ -258,6 +258,7 @@ class RadauDAE(OdeSolver):
                  bUsePredictiveNewtonStoppingCriterion=True,
                  bUseExtrapolatedGuess=True,
                  bReport=False,
+                 bPerformAllNewtonIterations=False,
                  **extraneous):
 
         warn_extraneous(extraneous)
@@ -275,7 +276,7 @@ class RadauDAE(OdeSolver):
         self.bUsePredictiveController = bUsePredictiveController # If True, adaptive time step controller is used
         self.jacobianRecomputeFactor = jacobianRecomputeFactor # if convergence rate is lower than this value after a step, the Jacobian is updated
         self.bReport = bReport # if True, details (error, Newton iterations) of each step are stored
-        
+        self.bPerformAllNewtonIterations = bPerformAllNewtonIterations # if True, all Newton iterations are performed, unless convergence is reached
         if self.bReport:
           self.reports={"t":[],"dt":[],"code":[],'newton_iterations':[], 'bad_iterations':[],
                    "err1":[], "err2":[], "errors1":[], "errors2":[], "error_scale": []}
@@ -518,10 +519,14 @@ class RadauDAE(OdeSolver):
 
         if abs(self.t_bound - (t + self.direction * h_abs)) < 1e-2*h_abs:
             # the next time step would be too small
-            # --> we cut the remaining time in half
+            # # --> we cut the remaining time in half
+            # if BPRINT:
+            #     print('Reducing time step to avoid a last tiny step')
+            # h_abs = abs(self.t_bound - t) / 2
+            # we increase the time step to match the final time
             if BPRINT:
-                print('Reducing time step to avoid a last tiny step')
-            h_abs = abs(self.t_bound - t) / 2
+                print('Increasing time step to avoid a last tiny step')
+            h_abs = abs(self.t_bound - t)
             # require refactorisation of the iteration matrices
             self.LU_real = None
             self.LU_complex = None
@@ -884,7 +889,8 @@ class RadauDAE(OdeSolver):
                                 print('\t\tbad iteration (rate>1)')
                             nbad_iter+=1
                             continue
-                    break
+                    if not self.bPerformAllNewtonIterations:
+                      break
                 if dW_true < tol:
                     if BPRINT:
                         print('\t\t--> ||dW*|| < tol={:.2e}'.format(tol))
@@ -899,7 +905,8 @@ class RadauDAE(OdeSolver):
                         if BPRINT:
                             print('\t\t/!\ bad iteration (||dW**|| too large)')
                         continue
-                    break
+                    if not self.bPerformAllNewtonIterations:
+                      break
 
             dW_norm_old  = dW_norm
             res_norm_old = res_norm
@@ -1152,3 +1159,23 @@ def solve_ivp_custom(fun, t_span, y0, method=RadauDAE, t_eval=None, dense_output
         out.tsub = np.hstack(tsub)
         out.fsub = np.vstack(fsub).T
     return out
+
+if __name__=='__main__':
+  # some quick analysis
+  import matplotlib.pyplot as plt
+  rtol = np.logspace(-16,3,1000)
+  newton_tol = np.maximum(10 * EPS / rtol, np.minimum(0.03, rtol ** 0.5))
+  rtol_changed = 0.1*rtol**(2/3)
+  plt.figure()
+  plt.loglog(rtol, newton_tol, label='relative Newton', linestyle='--', linewidth=3)
+  plt.loglog(rtol, rtol, label='rtol', linestyle='--', color=[0,0,0])
+  plt.loglog(rtol, rtol_changed, label='modified rtol')
+  plt.loglog(rtol, newton_tol*rtol, label='absolute rtol Newton')
+  plt.loglog(rtol, newton_tol*rtol_changed, label='absolute rtol changed Newton')
+  plt.loglog(rtol, 10 * EPS / rtol, label='10 * EPS / rtol')
+  plt.loglog(rtol, rtol ** 0.5, label='rtol ** 0.5')
+  plt.loglog(rtol, 0.03 + 0*rtol, label='0.03')
+  plt.xlabel('rtol')
+  plt.legend(ncol=2, framealpha=0.3, loc='upper center')
+  plt.ylabel('tolerances')
+  plt.grid()

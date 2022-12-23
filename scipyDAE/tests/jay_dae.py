@@ -12,8 +12,8 @@ https://doi.org/10.1016/0168-9274(95)00013-K
 """
 import numpy as np
 
-from scipy.integrate import solve_ivp
 from scipyDAE.radauDAE import RadauDAE
+from scipyDAE.radauDAE import solve_ivp_custom as solve_ivp
 from scipy.optimize._numdiff import approx_derivative
 
 
@@ -45,12 +45,13 @@ def generate_Jay1995(nonlinear_multiplier):
 
         return dy
 
-    # the jacobian is computed via finite-differences
-    def jac(t, x):
-        return approx_derivative(
-            fun=lambda x: fun(t, x), x0=x, method="cs", rel_step=1e-50
-        )
-
+    # # the jacobian is computed via finite-differences
+    # def jac(t, x):
+    #     return approx_derivative(
+    #         fun=lambda x: fun(t, x), x0=x, method="cs", rel_step=1e-50
+    #     )
+    jac = None
+    
     # construct singular mass matrix
     mass_matrix = np.eye(5)
     mass_matrix[-1, -1] = 0
@@ -61,7 +62,7 @@ def generate_Jay1995(nonlinear_multiplier):
 
     t_span = (0, 0.1)
     # var_index = None
-    var_index = np.array([0,0,0,0,2])
+    var_index = np.array([0,0,0,0,3])
     return y0, mass_matrix, var_index, fun, jac, t_span
 
 
@@ -71,54 +72,59 @@ if __name__ == "__main__":
         nonlinear_multiplier=True
     )
 
+    sol = solve_ivp(
+                        fun=fun,
+                        t_span=t_span,
+                        y0=y0,
+                        rtol=1e-9,
+                        atol=1e-10,
+                        jac=jac,
+                        method=RadauDAE,
+                        first_step=1e-5,
+                        mass_matrix=mass_matrix,
+                        bPrint=True,
+                        dense_output=True,
+                        max_newton_ite=6, min_factor=0.2, max_factor=10,
+                        var_index=var_index,
+                        newton_tol=None,
+                        zero_algebraic_error = True,
+                        scale_residuals = True,
+                        scale_newton_norm = True,
+                        scale_error = True,
+                        max_bad_ite=2,
+                        jacobianRecomputeFactor=1e-3,
+                        bAlwaysApply2ndEstimate=True,
+                        bUsePredictiveController=True,
+                        bUsePredictiveNewtonStoppingCriterion=True,
+                        bUseExtrapolatedGuess=True,
+                        bReport=True,
+                    )
+
+    # dt = 1e-4
     # sol = solve_ivp(
     #                     fun=fun,
     #                     t_span=t_span,
     #                     y0=y0,
-    #                     rtol=1e-10,
-    #                     atol=1e-10,
+    #                     rtol=1e0,
+    #                     atol=1e-2,
     #                     jac=jac,
-    #                     method=Radau,
-    #                     first_step=1e-5,
+    #                     method=RadauDAE,
+    #                     first_step=dt,
+    #                     max_step=dt,
+    #                     constant_dt=True,
     #                     mass_matrix=mass_matrix,
     #                     bPrint=True,
     #                     dense_output=True,
     #                     max_newton_ite=10, min_factor=0.2, max_factor=10,
     #                     var_index=var_index,
-    #                     # newton_tol=1e-1,
+    #                     newton_tol=1e-8,
     #                     zero_algebraic_error = True,
     #                     scale_residuals = True,
     #                     scale_newton_norm = True,
     #                     scale_error = True,
-    #                     max_bad_ite=2,
-    #                     max_inner_jac_update=3,
+    #                     max_bad_ite=1,
+    #                     max_inner_jac_update=1,
     #                 )
-
-    dt = 1e-4
-    sol = solve_ivp(
-                        fun=fun,
-                        t_span=t_span,
-                        y0=y0,
-                        rtol=1e0,
-                        atol=1e-2,
-                        jac=jac,
-                        method=RadauDAE,
-                        first_step=dt,
-                        max_step=dt,
-                        constant_dt=True,
-                        mass_matrix=mass_matrix,
-                        bPrint=True,
-                        dense_output=True,
-                        max_newton_ite=10, min_factor=0.2, max_factor=10,
-                        var_index=var_index,
-                        newton_tol=1e-8,
-                        zero_algebraic_error = True,
-                        scale_residuals = True,
-                        scale_newton_norm = True,
-                        scale_error = True,
-                        max_bad_ite=1,
-                        max_inner_jac_update=1,
-                    )
 
     assert sol.success
 
