@@ -592,10 +592,10 @@ class RadauDAE(OdeSolver):
                   if self.bDebug:
                       U_matrix = np.triu(LU_real[0],k=0)
                       L_matrix = np.tril(LU_real[0],k=-1)+self.I
-                      self.info['cond']['LU_real'].append(np.linalg.cond(U_matrix*L_matrix))
+                      self.info['cond']['LU_real'].append(np.linalg.cond(U_matrix @ L_matrix))
                       U_matrix = np.triu(LU_complex[0],k=0)
                       L_matrix = np.tril(LU_complex[0],k=-1)+self.I
-                      self.info['cond']['LU_complex'].append(np.linalg.cond(U_matrix*L_matrix))
+                      self.info['cond']['LU_complex'].append(np.linalg.cond(U_matrix @ L_matrix))
                       self.info['cond']['t'].append(t)
                       self.info['cond']['h'].append(h)
                       print('\tcond(LU_real)    = {:.3e}'.format( self.info['cond']['LU_real'][-1] ))
@@ -953,7 +953,7 @@ class RadauDenseOutput(DenseOutput):
         return y
 
 
-
+import time as pytime
 MESSAGES = {0: "The solver successfully reached the end of the integration interval.",
             1: "A termination event occurred.",
             2: "Too many time steps have been performed",
@@ -974,6 +974,8 @@ def solve_ivp_custom(fun, t_span, y0, method=RadauDAE, t_eval=None, dense_output
                          .format(METHODS))
 
     t0, tf = float(t_span[0]), float(t_span[1])
+    
+    tCPU_1 = pytime.time()
 
     if args is not None:
         # Wrap the user's fun (and jac, if given) in lambdas to hide the
@@ -1158,6 +1160,9 @@ def solve_ivp_custom(fun, t_span, y0, method=RadauDAE, t_eval=None, dense_output
         out.ysub = np.vstack(ysub).T
         out.tsub = np.hstack(tsub)
         out.fsub = np.vstack(fsub).T
+        
+    tCPU_2 = pytime.time()
+    out.CPUtime = tCPU_2 - tCPU_1
     return out
 
 if __name__=='__main__':

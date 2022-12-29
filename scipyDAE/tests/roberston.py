@@ -49,10 +49,11 @@ References:
 """
 import numpy as np
 from scipy.sparse import diags
-from scipy.integrate import solve_ivp
+# from scipy.integrate import solve_ivp
 from numpy.testing import (assert_, assert_allclose,
                            assert_equal, assert_no_warnings, suppress_warnings)
-
+from scipyDAE.radauDAE import solve_ivp_custom as solve_ivp
+import time as pytime
 
 ## Choice of integration method
 from scipyDAE.radauDAE import RadauDAE
@@ -60,7 +61,7 @@ from scipyDAE.radauDAE import RadauDAE
 method=RadauDAE
 
 
-bPrint=True # if True, Radau prints additional information during the computation
+bPrint=False # if True, Radau prints additional information during the computation
 
 #%% Define the ODE formulation
 mass     = np.array([[1.,0.,0.],[0.,1.,0.],[0.,0.,0.]])
@@ -75,6 +76,7 @@ modelfun_DAE = lambda t,y: np.array([-0.04*y[0] + 1e4*y[1]*y[2],
                                      0.04*y[0] - 1e4*y[1]*y[2] - 3e7*(y[1]**2),
                                      coeff*(y[0] + y[1] + y[2] - 1)])
 var_index = np.array([0,0,1]) # index of the components
+#TODO: the sacling poses issues when the time stpe is >> 1
 
 jac_dae = lambda t,y: np.array([[-0.04, 1e4*y[2], 1e4*y[1]],
                                 [0.04, -1e4*y[2] - 2*3e7*y[1], 1e4*y[1]],
@@ -83,7 +85,7 @@ jac_dae = lambda t,y: np.array([[-0.04, 1e4*y[2], 1e4*y[1]],
 
 # Integration parameters
 y0 = np.array([1.,0.,0.]) # initial condition
-rtol=1e-7; atol=1e-6 # absolute and relative tolerances for time step adaptation
+rtol=1e-8; atol=rtol/10 #1e-6 # absolute and relative tolerances for time step adaptation
 tf = 5e6 # final time
 # tf = 1e2 # final time
 # above t=0.2, the Radau solution in the DAE case has more difficulties
@@ -92,31 +94,51 @@ tf = 5e6 # final time
 # to be the root of the issue as experiments with "coeff" suggest)
 
 # solve the ODE formulation
+t1 = pytime.time()
 sol_ode = solve_ivp(fun=modelfun_ODE, t_span=(0., tf), y0=y0, max_step=np.inf,
                     rtol=rtol, atol=atol, jac=None, jac_sparsity=None,
                     method=method, vectorized=False, first_step=1e-8, dense_output=True,
-                    mass_matrix=None, bPrint=bPrint)
-
-# solve the DAE formulation
-sol_dae = solve_ivp(fun=modelfun_DAE, t_span=(0., tf), y0=y0, max_step=np.inf,
-                    rtol=rtol, atol=atol, jac=jac_dae, jac_sparsity=None,
-                    method=method, vectorized=False, first_step=1e-8, dense_output=True,
-                    max_newton_ite=8, min_factor=0.2, max_factor=10,
-                    var_index=var_index,
-                    # newton_tol=1e-4,
+                    max_newton_ite=150, max_bad_ite=20,
                     scale_residuals = True,
                     scale_newton_norm = True,
                     scale_error = True,
-                    max_bad_ite=1,
-                    max_inner_jac_update = 0,
-                    mass_matrix=mass, bPrint=bPrint)
+                    mass_matrix=None, bPrint=bPrint,
+                    bReport=True)
+t2 = pytime.time()
+sol_ode.CPUtime = t2-t1
 
+# solve the DAE formulation
+t1 = pytime.time()
+sol_dae = solve_ivp(fun=modelfun_DAE, t_span=(0., tf), y0=y0, max_step=np.inf,
+                    rtol=rtol, atol=atol, jac=jac_dae, jac_sparsity=None,
+                    method=method, vectorized=False, first_step=1e-8, dense_output=True,
+                    max_newton_ite=150, max_bad_ite=20,
+                    min_factor=0.2, max_factor=10,
+                    var_index=var_index,
+                    newton_tol=1e-3,
+                    scale_residuals = True,
+                    scale_newton_norm = True,
+                    scale_error = True,
+                    mass_matrix=mass, bPrint=bPrint,
+                    bReport=True)
+t2 = pytime.time()
+sol_dae.CPUtime = t2-t1
 # print("DAE solved in {} time steps, {} fev, {} jev, {} LUdec, {} LU solves".format(
 #   sol_dae.t.size, sol_dae.nfev, sol_dae.njev, sol_dae.nlu, sol_dae.solver.nlusove))
-print("DAE solved in {} time steps, {} fev, {} jev, {} LUdec".format(
-  sol_dae.t.size, sol_dae.nfev, sol_dae.njev, sol_dae.nlu))
-print("ODE solved in {} time steps, {} fev, {} jev, {} LUdec".format(
-  sol_ode.t.size, sol_ode.nfev, sol_ode.njev, sol_ode.nlu))
+for sol,name in ((sol_dae, 'DAE'),(sol_ode,'ODE')):
+  sol.reports = sol.solver.reports
+  for key in sol.reports.keys():
+     sol.reports[key] = np.array(sol.reports[key])
+  if sol.success:
+      state='solved'
+  else:
+      state='failed'
+
+  print("\n{} {}".format(name, state))
+  print("\t{} time steps in {}s\n\t({} = {} accepted + {} rejected + {} failed)".format(
+    sol.t.size-1, sol.CPUtime, sol.solver.nstep, sol.solver.naccpt, sol.solver.nrejct, sol.solver.nfailed))
+  print("\t{} fev, {} jev, {} LUdec, {} linsolves, {} linsolves for error estimation".format(
+        sol.nfev, sol.njev, sol.nlu, sol.solver.nlusolve, sol.solver.nlusolve_errorest))
 
 
 #%% Plot the solution and some useful statistics
@@ -186,7 +208,7 @@ plt.grid()
 #%% Tests (for Scipy integration)
 assert_(sol_dae.success, msg=f'DAE solution failed with solver {method}')
 assert_(sol_ode.success, msg=f'ODE solution failed with solver {method}')
-assert_allclose(sol_ode.y[:,-1], sol_dae.y[:,-1], rtol=max(atol,rtol)**0.5, err_msg='the DAE and ODE solutions are not close enough')
+assert_allclose(sol_ode.y[:,-1], sol_dae.y[:,-1], rtol=5*max(atol,rtol)**0.5, err_msg='the DAE and ODE solutions are not close enough')
 # assert_(sol_ode.t.size==sol_dae.t.size, msg='the mass-matrix option should not affect the number of steps')
 # assert_((sol_ode.nlu - sol_dae.nlu)/sol_ode.nlu < 0.3, msg='the mass-matrix option should not worsen the performance as much (number of LU-decomposition)')
 
@@ -197,10 +219,12 @@ denseout_ode = sol_ode.sol(test_t)
 # Relative error on the dense output (DAE vs ODE)
 plt.figure()
 for i in range(3):
-  plt.semilogy(test_t, abs(denseout_ode[i,:] - denseout_dae[i,:])/(atol+abs(denseout_ode[i,:])), linewidth=2/(i+1))
+  plt.semilogy(test_t, abs(denseout_ode[i,:] - denseout_dae[i,:])/(rtol+abs(denseout_ode[i,:])), linewidth=2/(i+1), label=f'var {i}')
+plt.axhline(rtol, color=[0,0,0], linestyle='--', label='rtol')
 plt.xlabel('t (s)')
 plt.ylim(1e-20, 1e5)
 plt.grid()
+plt.legend()
 plt.ylabel('relative error on\nthe dense output')
 
 # assert_(np.max( np.abs(denseout_ode - denseout_dae)/(atol+denseout_ode) )<max(atol,rtol)**0.5, 'DAE dense output is not close to the ODE one.')
