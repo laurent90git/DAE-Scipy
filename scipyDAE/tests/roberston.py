@@ -71,36 +71,30 @@ modelfun_ODE = lambda t,y: np.array([-0.04*y[0] + 1e4*y[1]*y[2],
                                      3e7*(y[1]**2)])
 
 #%% Define the DAE system
-coeff = 1e0 # scaling for the algebraic equations
 modelfun_DAE = lambda t,y: np.array([-0.04*y[0] + 1e4*y[1]*y[2],
                                      0.04*y[0] - 1e4*y[1]*y[2] - 3e7*(y[1]**2),
-                                     coeff*(y[0] + y[1] + y[2] - 1)])
-var_index = np.array([0,0,1]) # index of the components
-#TODO: the sacling poses issues when the time stpe is >> 1
+                                     y[0] + y[1] + y[2] - 1])
+var_index = np.array([0,0,1]) # algebraic index of the components
 
 jac_dae = lambda t,y: np.array([[-0.04, 1e4*y[2], 1e4*y[1]],
-                                [0.04, -1e4*y[2] - 2*3e7*y[1], 1e4*y[1]],
-                                [coeff, coeff, coeff],])
-# jac_dae = None
+                                [0.04, -1e4*y[2] - 2*3e7*y[1], -1e4*y[1]],
+                                [1, 1, 1],])
+# jac_dae = None # will be computed via finite-differences
 
 # Integration parameters
 y0 = np.array([1.,0.,0.]) # initial condition
-rtol=1e-8; atol=rtol/10 #1e-6 # absolute and relative tolerances for time step adaptation
+rtol=1e-10; atol=rtol/10 #1e-6 # absolute and relative tolerances for time step adaptation
 tf = 5e6 # final time
-# tf = 1e2 # final time
-# above t=0.2, the Radau solution in the DAE case has more difficulties
-# to converge, potentially because, as h becomes important, the problem with a
-# singular mass matrix is poorly conditioned (actually, this does not seem
-# to be the root of the issue as experiments with "coeff" suggest)
+
 
 # solve the ODE formulation
 t1 = pytime.time()
 sol_ode = solve_ivp(fun=modelfun_ODE, t_span=(0., tf), y0=y0, max_step=np.inf,
                     rtol=rtol, atol=atol, jac=None, jac_sparsity=None,
                     method=method, vectorized=False, first_step=1e-8, dense_output=True,
-                    max_newton_ite=150, max_bad_ite=20,
+                    max_newton_ite=6, max_bad_ite=0,
                     scale_residuals = True,
-                    scale_newton_norm = True,
+                    scale_newton_norm = False,
                     scale_error = True,
                     mass_matrix=None, bPrint=bPrint,
                     bReport=True)
@@ -112,12 +106,12 @@ t1 = pytime.time()
 sol_dae = solve_ivp(fun=modelfun_DAE, t_span=(0., tf), y0=y0, max_step=np.inf,
                     rtol=rtol, atol=atol, jac=jac_dae, jac_sparsity=None,
                     method=method, vectorized=False, first_step=1e-8, dense_output=True,
-                    max_newton_ite=150, max_bad_ite=20,
+                    max_newton_ite=6, max_bad_ite=0,
                     min_factor=0.2, max_factor=10,
                     var_index=var_index,
-                    newton_tol=1e-3,
+                    # newton_tol=1e-1,
                     scale_residuals = True,
-                    scale_newton_norm = True,
+                    scale_newton_norm = False,
                     scale_error = True,
                     mass_matrix=mass, bPrint=bPrint,
                     bReport=True)

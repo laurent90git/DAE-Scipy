@@ -8,6 +8,8 @@ Test Jay's problem
 https://github.com/scipy/scipy/pull/13068
 https://doi.org/10.1016/0168-9274(95)00013-K
 
+The second problem given in this paper fails, unless the predictive convergence
+test for the Newton loop is deactivated, or bad Newton iterations are allowed.
 @author: lfrancoi
 """
 import numpy as np
@@ -76,8 +78,8 @@ if __name__ == "__main__":
                         fun=fun,
                         t_span=t_span,
                         y0=y0,
-                        rtol=1e-6,
-                        atol=1e-7,
+                        rtol=1e-3,
+                        atol=1e-4,
                         jac=jac,
                         method=RadauDAE,
                         first_step=1e-5,
@@ -88,14 +90,14 @@ if __name__ == "__main__":
                         var_index=var_index,
                         newton_tol=None,
                         zero_algebraic_error = True,
-                        scale_residuals = True,
-                        scale_newton_norm = True,
+                        scale_residuals = False,
+                        scale_newton_norm = False,
                         scale_error = True,
-                        max_bad_ite=2,
+                        max_bad_ite=0,
                         jacobianRecomputeFactor=1e-3,
                         bAlwaysApply2ndEstimate=True,
                         bUsePredictiveController=True,
-                        bUsePredictiveNewtonStoppingCriterion=True,
+                        bUsePredictiveNewtonStoppingCriterion=False,
                         bUseExtrapolatedGuess=True,
                         bReport=True,
                     )

@@ -77,7 +77,7 @@ Created on Mon Nov  2 14:54:33 2020
 
     Additional information can be printed during the Radau computation by setting
     bPrint to True:
-      newton convergence, norm of the error estimate...
+      Newton convergence, norm of the error estimate...
 
   References:
     [1] Hairer, Ernst & Lubich, Christian & Roche, Michel. (1989)
@@ -246,46 +246,57 @@ if __name__=='__main__':
 
 
     ###### Parameters to play with
-    chosen_index = 3 # The index of the DAE formulation
     tf = 10.0        # final time (one oscillation is ~2s long)
-    rtol=1e-6; atol=rtol # relative and absolute tolerances for time adaptation
+    rtol=1e-8; atol=rtol # relative and absolute tolerances for time adaptation
     # dt_max = np.inf
     # rtol=1e-3; atol=rtol # relative and absolute tolerances for time adaptation
     bPrint=False # if True, additional printouts from Radau during the computation
-    bDebug=False # sutdy condition number of the iteration matrix
+    bDebug=False # study condition number of the iteration matrix
     method=RadauDAE
 
     ## Physical parameters for the pendulum
-    theta_0=np.pi/6 # initial angle
+    theta_0=np.pi/2 # initial angle
     theta_dot0=0. # initial angular velocity
     r0=3.  # rod length
     m=1.   # mass
     g=9.81 # gravitational acceleration
+    print('Theoretical linear pendulum period={:.4e} s'.format(2*np.pi*np.sqrt(r0/g)))
 
-    dae_fun, jac_dae, mass, Xini, var_index= generateSystem(chosen_index, theta_0, theta_dot0, r0, m, g)
-    # jac_dae = None
-    #%% Solve the DAE
-    print(f'Solving the index {chosen_index} formulation')
-    sol = solve_ivp(fun=dae_fun, t_span=(0., tf), y0=Xini, max_step=tf/10,
-                    rtol=rtol, atol=atol, jac=jac_dae, jac_sparsity=None,
-                    method=method, vectorized=False, first_step=1e-3, dense_output=True,
-                    mass_matrix=mass, bPrint=bPrint, return_substeps=True,
-                    max_newton_ite=6, min_factor=0.2, max_factor=10,
-                    var_index=var_index,
-                    # newton_tol=1e-4,
-                    scale_residuals = True,
-                    scale_newton_norm = True,
-                    scale_error = True,
-                    max_bad_ite=1,
-                    bDebug=bDebug)
-    print("DAE of index {} {} in {} time steps, {} fev, {} jev, {} LUdec".format(
-          chosen_index, 'solved'*sol.success+(1-sol.success)*'failed',
-          sol.t.size, sol.nfev, sol.njev, sol.nlu))
+    # chosen_index = 2 # The index of the DAE formulation
+    for chosen_index in range(4):
+      # As the index increases, the constraint becomes more and more nonlinear,
+      # thus the Newton loop may need may Jacobian updates to converge.
+      # Also, for the highest indexes, the Newton may have troubles achieving high levels of convergence
+      # on the algebraic variables. It is therefore useful to increase the relative Newton tolerance (e.g. 1e-1)
 
-    # recover the time history of each variable
-    x=sol.y[0,:]; y=sol.y[1,:]; vx=sol.y[2,:]; vy=sol.y[3,:]; lbda=sol.y[4,:]
-    T = lbda * np.sqrt(x**2+y**2)
-    theta = computeAngle(x,y) #np.arctan(x/y)
+      dae_fun, jac_dae, mass, Xini, var_index= generateSystem(chosen_index, theta_0, theta_dot0, r0, m, g)
+      jac_dae = None
+      #%% Solve the DAE
+      print(f'Solving the index {chosen_index} formulation')
+      sol = solve_ivp(fun=dae_fun, t_span=(0., tf), y0=Xini, max_step=tf/10,
+                      rtol=rtol, atol=atol, jac=jac_dae, jac_sparsity=None,
+                      method=method, vectorized=False, first_step=1e-3, dense_output=True,
+                      mass_matrix=mass, bPrint=bPrint, return_substeps=True,
+                      max_newton_ite=10, min_factor=0.2, max_factor=10,
+                      var_index=var_index,
+                      newton_tol=1e-2, # TODO: depending on each variable's index ?
+                      scale_residuals = True,
+                      scale_newton_norm = False,
+                      scale_error = True,
+                      max_bad_ite=1,
+                      bDebug=bDebug)
+      print("DAE of index {} {} in {} time steps, {} fev, {} jev, {} LUdec".format(
+            chosen_index, 'solved'*sol.success+(1-sol.success)*'failed',
+            sol.t.size, sol.nfev, sol.njev, sol.nlu))
+  
+      # recover the time history of each variable
+      x=sol.y[0,:]; y=sol.y[1,:]; vx=sol.y[2,:]; vy=sol.y[3,:]; lbda=sol.y[4,:]
+      T = lbda * np.sqrt(x**2+y**2)
+      theta = computeAngle(x,y) #np.arctan(x/y)
+
+      #%% Find period
+      t_change = sol.t[:-1][np.diff(np.sign(vx))<0]
+      print('\tNumerical period={:.4e} s'.format(np.mean(np.diff(t_change))))
 
     #%% Compute true solution (ODE on the angle in polar coordinates)
     def fun_ode(t,X):
@@ -304,6 +315,9 @@ if __name__=='__main__':
     vx_ode =  r0*theta_dot*np.cos(theta_ode)
     vy_ode =  r0*theta_dot*np.sin(theta_ode)
     T_ode = m*r0*theta_dot**2 + m*g*np.cos(theta_ode)
+    #%% Find period
+    t_change = sol_ode.t[:-1][np.diff(np.sign(vx_ode))<0]
+    print('\tNumerical period (ref) ={:.4e} s'.format(np.mean(np.diff(t_change))))
 
     #%% Compare the DAE solution and the true solution
     plt.figure()
@@ -414,7 +428,3 @@ if __name__=='__main__':
     plt.ylabel(f'var {ivar}')
     plt.title('Dense output')
 
-    #%% Find period
-    t_change = sol.t[:-1][np.diff(np.sign(vx))<0]
-    print('Numerical period={:.2e} s'.format(np.mean(np.diff(t_change))))
-    print('Theoretical period={:.2e} s'.format(2*np.pi*np.sqrt(r0/g)))

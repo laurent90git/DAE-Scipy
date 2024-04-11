@@ -265,6 +265,9 @@ class RadauDAE(OdeSolver):
         super().__init__(fun, t0, y0, t_bound, vectorized)
         self.t0 = t0
 
+        if scale_newton_norm:
+          print('/!\ scale_newton_norm should probably never be to activated I think !')
+          
         self.NEWTON_MAXITER = max_newton_ite # Maximum number of Newton iterations
         self.MIN_FACTOR = min_factor # Minimum allowed decrease in a step size
         self.MAX_FACTOR = max_factor # Maximum allowed increase in a step size
@@ -305,6 +308,7 @@ class RadauDAE(OdeSolver):
             self.newton_tol = max(10 * EPS / rtol, min(0.03, rtol ** 0.5))
         else:
             self.newton_tol = newton_tol
+        print(f'Setting Newton tol to {self.newton_tol:.3e}')
         self.sol = None
         self.constant_dt = constant_dt
 
@@ -380,8 +384,12 @@ class RadauDAE(OdeSolver):
         self.var_exp[ self.var_exp < 0 ] = 0 # for differential components
 
         if not ( max_bad_ite is None ):
-            self.NMAX_BAD = max_bad_ite # Maximum number of bad iterations
-        else:
+            self.NMAX_BAD = max_bad_ite # Maximum number of bad iterations per step
+            # this may be useful when the Newton starts with a bad iteration, which
+            # may temporarily cause a rise in the Newton increment norm, or let
+            # the predicted Newton error after the max number of iterations be
+            # too high
+        else: # by default, if the DAE has index>1, allow one bad iteration
             if np.any(self.var_index>1):
                 self.NMAX_BAD = 1
             else:
@@ -503,7 +511,7 @@ class RadauDAE(OdeSolver):
         atol = self.atol
         rtol = self.rtol
 
-        min_step = 10 * np.abs(np.nextafter(t, self.direction * np.inf) - t)
+        min_step = max(1e-20, 10 * np.abs(np.nextafter(t, self.direction * np.inf) - t) )
         if self.h_abs > max_step:
             h_abs = max_step
             h_abs_old = None
@@ -543,6 +551,8 @@ class RadauDAE(OdeSolver):
         message = None
         while not step_accepted:
             if h_abs < min_step:
+                if BPRINT:
+                  print(f'time step is too small ({h_abs:.3e}<{min_step:.3e}')
                 return False, self.TOO_SMALL_STEP
 
             h = h_abs * self.direction
@@ -561,7 +571,7 @@ class RadauDAE(OdeSolver):
                 Z0 = self.sol(t + h * C).T - y  # extrapolate using previous dense output
 
             newton_scale = atol + np.abs(y) * rtol
-            if self.scale_newton_norm:
+            if self.scale_newton_norm: #TODO: this seems to be bad idea
                 newton_scale = newton_scale / (h**self.var_exp) # scale for algebraic variables in the Newton increment norm
 
             converged = False

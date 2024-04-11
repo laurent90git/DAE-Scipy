@@ -66,10 +66,7 @@ jac_dae = lambda t,x: scipy.optimize._numdiff.approx_derivative(fun=lambda x: mo
 
 
 # 1 - solve the ODE
-tf = 0.2 # final time
-# above that time, the Radau solution in the DAE case has more difficulties
-# to converge, potentially because, as h becomes important, the problem with a
-# singular mass matrix is poorly conditioned.
+tf = 1. # final time
 rtol=1e-4; atol=1e-4
 
 sol = solve_ivp(fun=modelfun_DAE, t_span=(0., tf), y0=y0, max_step=np.inf,
@@ -77,10 +74,10 @@ sol = solve_ivp(fun=modelfun_DAE, t_span=(0., tf), y0=y0, max_step=np.inf,
                     method=method, vectorized=False, first_step=1e-8, dense_output=True,
                     mass_matrix=mass,
                     var_index=None,
-                    # newton_tol=1e-2,
+                    # newton_tol=1e-1,
                     scale_residuals = False,
                     scale_newton_norm = False,
-                    scale_error = False,
+                    scale_error = True,
                     zero_algebraic_error = False,
                     max_bad_ite=0)
 
