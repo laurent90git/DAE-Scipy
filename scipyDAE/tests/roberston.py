@@ -87,6 +87,21 @@ rtol=1e-10; atol=rtol/10 #1e-6 # absolute and relative tolerances for time step 
 tf = 5e6 # final time
 
 
+# solve the DAE formulation
+t1 = pytime.time()
+sol_dae = solve_ivp(fun=modelfun_DAE, t_span=(0., tf), y0=y0, max_step=np.inf,
+                    rtol=rtol, atol=atol, jac=None, jac_sparsity=None,
+                    method=method, vectorized=False, first_step=1e-8, dense_output=True,
+                    max_newton_ite=6, max_bad_ite=0,
+                    min_factor=0.2, max_factor=10,
+                    var_index=var_index,
+                    # newton_tol=1e-1,
+                    scale_residuals = True,
+                    scale_newton_norm = False,
+                    scale_error = True,
+                    mass_matrix=mass, bPrint=True,
+                    bReport=True)
+
 # solve the ODE formulation
 t1 = pytime.time()
 sol_ode = solve_ivp(fun=modelfun_ODE, t_span=(0., tf), y0=y0, max_step=np.inf,
@@ -101,20 +116,36 @@ sol_ode = solve_ivp(fun=modelfun_ODE, t_span=(0., tf), y0=y0, max_step=np.inf,
 t2 = pytime.time()
 sol_ode.CPUtime = t2-t1
 
-# solve the DAE formulation
-t1 = pytime.time()
-sol_dae = solve_ivp(fun=modelfun_DAE, t_span=(0., tf), y0=y0, max_step=np.inf,
-                    rtol=rtol, atol=atol, jac=jac_dae, jac_sparsity=None,
-                    method=method, vectorized=False, first_step=1e-8, dense_output=True,
-                    max_newton_ite=6, max_bad_ite=0,
-                    min_factor=0.2, max_factor=10,
-                    var_index=var_index,
-                    # newton_tol=1e-1,
-                    scale_residuals = True,
-                    scale_newton_norm = False,
-                    scale_error = True,
-                    mass_matrix=mass, bPrint=bPrint,
-                    bReport=True)
+
+
+# sol_dae = solve_ivp(fun=modelfun_DAE,     # DAE system function
+#                     jac=jac_dae,
+#                 t_span=(0., tf),      # Time integration range [start, end]
+#                 y0=y0,                # Initial condition vector
+#                 max_step=np.inf,       # No upper limit on time step size
+#                 rtol=rtol,            # Relative tolerance for error control
+#                 atol=atol,            # Absolute tolerance for error control
+#                 method=method,         # Using RadauDAE solver for stiff DAEs
+#                 vectorized=False,      # Function is not vectorized (single evaluation)
+#                 first_step=1e-8,       # Initial time step size [s] (very small for startup)
+#                 dense_output=True,     # Enable solution interpolation between points
+                
+#                 # RadauDAE-specific parameters for Newton iterations:
+#                 max_newton_ite=150,    # Maximum Newton iterations per time step
+#                 max_bad_ite=20,        # Maximum failed step attempts before reducing step size
+#                 min_factor=0.2,        # Minimum step size reduction factor (80% reduction max)
+#                 max_factor=10,         # Maximum step size increase factor (10x increase max)
+#                 var_index=var_index,   # Variable type classification array
+#                 newton_tol=1e-3,       # Tolerance for Newton iteration convergence
+                
+#                 # Numerical scaling options for better conditioning:
+#                 scale_residuals = True,   # Scale residuals to improve numerical stability
+#                 scale_newton_norm = True, # Scale Newton update norms for better convergence
+#                 scale_error = True,       # Scale error estimates for adaptive step control
+                
+#                 mass_matrix=mass,
+#                 bReport=True)
+    
 t2 = pytime.time()
 sol_dae.CPUtime = t2-t1
 # print("DAE solved in {} time steps, {} fev, {} jev, {} LUdec, {} LU solves".format(

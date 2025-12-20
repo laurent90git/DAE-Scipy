@@ -969,7 +969,7 @@ MESSAGES = {0: "The solver successfully reached the end of the integration inter
             2: "Too many time steps have been performed",
             3: "Integration has been interrupted by the user"}
 def solve_ivp_custom(fun, t_span, y0, method=RadauDAE, t_eval=None, dense_output=False,
-              events=None, vectorized=False, args=None, return_substeps=False,
+              events=(), vectorized=False, args=None, return_substeps=False,
               nmax_step=np.inf,
               **options):
     """Solve an initial value problem for a system of ODEs.

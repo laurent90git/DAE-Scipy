@@ -79,7 +79,7 @@ sol = solve_ivp(fun=modelfun_DAE, t_span=(0., tf), y0=y0, max_step=np.inf,
                     scale_newton_norm = False,
                     scale_error = True,
                     zero_algebraic_error = False,
-                    max_bad_ite=0)
+                    max_bad_ite=1)
 
 #%% Tests
 assert_(sol.success, msg='DAE solution failed with solver {method}')
