@@ -231,8 +231,9 @@ def generateSystem(chosen_index, theta_0=np.pi/2, theta_dot0=0., r0=1., m=1, g=9
 
      # the initial condition should be consistent with the algebraic equations
     Xini = np.array([x0,y0,vx0,vy0,lbda_0])
-
-    return dae_fun, jac_dae, mass, Xini, var_index
+    tf = 10.0        # final time (one oscillation is ~2s long)
+    t_span = [0., tf]
+    return t_span, dae_fun, jac_dae, mass, Xini, var_index
 
 
 if __name__=='__main__':
@@ -246,7 +247,6 @@ if __name__=='__main__':
 
 
     ###### Parameters to play with
-    tf = 10.0        # final time (one oscillation is ~2s long)
     rtol=1e-8; atol=rtol # relative and absolute tolerances for time adaptation
     # dt_max = np.inf
     # rtol=1e-3; atol=rtol # relative and absolute tolerances for time adaptation
@@ -269,11 +269,11 @@ if __name__=='__main__':
       # Also, for the highest indexes, the Newton may have troubles achieving high levels of convergence
       # on the algebraic variables. It is therefore useful to increase the relative Newton tolerance (e.g. 1e-1)
 
-      dae_fun, jac_dae, mass, Xini, var_index= generateSystem(chosen_index, theta_0, theta_dot0, r0, m, g)
+      t_span, dae_fun, jac_dae, mass, Xini, var_index= generateSystem(chosen_index, theta_0, theta_dot0, r0, m, g)
       jac_dae = None
       #%% Solve the DAE
       print(f'Solving the index {chosen_index} formulation')
-      sol = solve_ivp(fun=dae_fun, t_span=(0., tf), y0=Xini, max_step=tf/10,
+      sol = solve_ivp(fun=dae_fun, t_span=t_span, y0=Xini, max_step=(t_span[1]-t_span[0])/10,
                       rtol=rtol, atol=atol, jac=jac_dae, jac_sparsity=None,
                       method=method, vectorized=False, first_step=1e-3, dense_output=True,
                       mass_matrix=mass, bPrint=bPrint, return_substeps=True,
@@ -305,8 +305,8 @@ if __name__=='__main__':
                        -g/r0*np.sin(theta)])
 
     Xini_ode= np.array([theta_0,theta_dot0])
-    sol_ode = solve_ivp(fun=fun_ode, t_span=(0., tf), y0=Xini_ode,
-                    rtol=rtol, atol=atol, max_step=tf/10, method=RadauDAE, bPrint=bPrint,
+    sol_ode = solve_ivp(fun=fun_ode, t_span=t_span, y0=Xini_ode,
+                    rtol=rtol, atol=atol, max_step=(t_span[1]-t_span[0])/10, method=RadauDAE, bPrint=bPrint,
                     dense_output=True, return_substeps=True)
     theta_ode = sol_ode.y[0,:]
     theta_dot = sol_ode.y[1,:]

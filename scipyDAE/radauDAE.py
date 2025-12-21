@@ -265,9 +265,6 @@ class RadauDAE(OdeSolver):
         super().__init__(fun, t0, y0, t_bound, vectorized)
         self.t0 = t0
 
-        if scale_newton_norm:
-          print('/!\ scale_newton_norm should probably never be to activated I think !')
-          
         self.NEWTON_MAXITER = max_newton_ite # Maximum number of Newton iterations
         self.MIN_FACTOR = min_factor # Minimum allowed decrease in a step size
         self.MAX_FACTOR = max_factor # Maximum allowed increase in a step size
@@ -571,8 +568,9 @@ class RadauDAE(OdeSolver):
                 Z0 = self.sol(t + h * C).T - y  # extrapolate using previous dense output
 
             newton_scale = atol + np.abs(y) * rtol
-            if self.scale_newton_norm: #TODO: this seems to be bad idea
-                newton_scale = newton_scale / (h**self.var_exp) # scale for algebraic variables in the Newton increment norm
+            if self.scale_newton_norm:
+                # scale Newton increment for convergence measure (see [3], p. 95)
+                newton_scale = newton_scale / (h**self.var_exp)
 
             converged = False
             while not converged:
@@ -853,7 +851,8 @@ class RadauDAE(OdeSolver):
 
             if res_norm_old is not None:
                 rate_res = res_norm / res_norm_old
-                print('\t\tresidual rate = {:.2e}'.format(rate_res))
+                if BPRINT:
+                  print('\t\tresidual rate = {:.2e}'.format(rate_res))
 
             # compute Newton increment
             dW_real    = self.solve_lu(LU_real,    f_real)
@@ -907,7 +906,7 @@ class RadauDAE(OdeSolver):
                     converged = True
                     break
                 if (dW_true_max_ite > tol) and self.bUsePredictiveNewtonStoppingCriterion :
-                    # Newton will not converge in the allowed number of iterations
+                    # Newton will most likely not converge in the allowed number of iterations
                     if BPRINT:
                       print('\t\t--> ||dW**|| > tol={:.2e}'.format(tol))
                     if nbad_iter<self.NMAX_BAD:

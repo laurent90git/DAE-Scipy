@@ -178,8 +178,9 @@ def generateSystem(n=50,initial_angle=np.pi/4, chosen_index=3):
     Xini =np.vstack((x0, y0, vx0, vy0, lbda0)).reshape((-1,), order='F')
 
     T_th = 2*np.pi*np.sqrt(L_chord/g) # theoretical period for a single pendulum of equal length
+    tf = 2*T_th # simulate 2 periods
 
-    return dae_fun, jac_dae, sparsity, mass, Xini, var_index, T_th, m
+    return [0., tf], dae_fun, jac_dae, sparsity, mass, Xini, var_index, T_th, m
 
 #%%
 if __name__=='__main__':
@@ -193,17 +194,16 @@ if __name__=='__main__':
     from scipyDAE.radauDAE import RadauDAE
     # from radauDAE_subjac import RadauDAE
     ###### Parameters to play with
-    n = 1000
+    n = 50 #1000
     initial_angle = np.pi/4
     chosen_index = 3 # The index of the DAE formulation
     rtol=1e-5; atol=rtol # relative and absolute tolerances for time adaptation
     bPrint=False # if True, additional printouts from Radau during the computation
     method=RadauDAE
 
-    dae_fun, jac_dae, sparsity, mass, Xini, var_index, T_th, m = \
+    t_span, dae_fun, jac_dae, sparsity, mass, Xini, var_index, T_th, m = \
         generateSystem(n, initial_angle, chosen_index)
 
-    tf = 2*T_th # simulate 2 periods
     # jac_dae = None
 
     #%%
@@ -230,7 +230,7 @@ if __name__=='__main__':
     #%% Solve the DAE
     print(f'Solving the index {chosen_index} formulation')
     t_start = pytime.time()
-    sol = solve_ivp(fun=dae_fun, t_span=(0., tf), y0=Xini, max_step=tf/10,
+    sol = solve_ivp(fun=dae_fun, t_span=t_span, y0=Xini, max_step=(t_span[1]-t_span[0])/10,
                     rtol=rtol, atol=atol, jac=jac_dae, jac_sparsity=sparsity,
                     method=method, vectorized=False, first_step=1e-3, dense_output=True,
                     mass_matrix=mass, bPrint=bPrint, bPrintProgress=True,
