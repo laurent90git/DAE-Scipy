@@ -122,7 +122,7 @@ if __name__ == "__main__":
         print("\t{} time steps in {}s\n\t({} = {} accepted + {} rejected + {} failed)".format(
           sol.t.size-1, sol.CPUtime, sol.solver.nstep, sol.solver.naccpt, sol.solver.nrejct, sol.solver.nfailed))
         print("\t{} fev, {} jev, {} LUdec, {} linsolves, {} linsolves for error estimation".format(
-              sol.nfev, sol.njev, sol.nlu, sol.solver.nlusolve, sol.solver.nlusolve_errorest))
+              sol.nfev, sol.njev, sol.nlu, sol.solver._nlusolve, sol.solver._nlusolve_errorest))
         
         #%%
         t,y=sol.t,sol.y

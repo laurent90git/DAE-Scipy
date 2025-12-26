@@ -55,7 +55,7 @@ sol_without_mass = solve_ivp(fun=modelfun_without_mass, t_span=(0., tf), y0=y0, 
 # print("ODE without mass matrix solved in {} time steps, {} fev, {} jev, {} LUdec, {} LU solves".format(
 #   sol_without_mass.t.size, sol_without_mass.nfev, sol_without_mass.njev,
 #   sol_without_mass.nlu, sol_without_mass.solver.nlusove))
-# Alternative print statements if "nlusolve" is not available
+# Alternative print statements if "_nlusolve" is not available
 print("ODE with mass matrix    solved in {} time steps, {} fev, {} jev, {} LUdec".format(
   sol_with_mass.t.size, sol_with_mass.nfev, sol_with_mass.njev,
   sol_with_mass.nlu))

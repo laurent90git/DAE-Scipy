@@ -11,6 +11,7 @@ import numpy as np
 import time as pytime
 from scipyDAE.radauDAE import RadauDAE
 from scipyDAE.radauDAE import solve_ivp_custom as solve_ivp
+from scipy.integrate._ivp import radau
 # from scipy.optimize._numdiff import approx_derivative
 
 
@@ -85,11 +86,11 @@ def getCase(ncase):
  }
 
 results = [[] for i in range(10)]
-for ncase in range(2):
+for ncase in range(10):
   case_name, t_span, y0, fun, jac, mass_matrix, var_index = getCase(ncase)
   
-  # jac = None
-  rtol=1e-3; atol=rtol/10
+  jac = None
+  rtol=1e-5; atol=rtol/10
 
   # solve the DAE formulation
   t1 = pytime.time()
@@ -108,8 +109,8 @@ for ncase in range(2):
                   scale_error = True,
                   mass_matrix=mass_matrix,
                   bAlwaysApply2ndEstimate=False,
-                  bUsePredictiveController=True,
-                  bUsePredictiveNewtonStoppingCriterion=False,
+                  bUsePredictiveController=False,
+                  bUsePredictiveNewtonStoppingCriterion=True,
                   bPrint=False,
                   bReport=True)
 
@@ -128,8 +129,8 @@ for ncase in range(2):
   print("\t{} time steps in {}s\n\t({} = {} accepted + {} rejected + {} failed)".format(
     sol.t.size-1, sol.CPUtime, sol.solver.nstep, sol.solver.naccpt, sol.solver.nrejct, sol.solver.nfailed))
   print("\t{} fev, {} jev, {} LUdec, {} linsolves, {} linsolves for error estimation".format(
-        sol.nfev, sol.njev, sol.nlu, sol.solver.nlusolve, sol.solver.nlusolve_errorest))
+        sol.nfev, sol.njev, sol.nlu, sol.solver._nlusolve, sol.solver._nlusolve_errorest))
 
   results[ncase].append(
     (sol.t.size-1, sol.CPUtime, sol.solver.nstep, sol.solver.naccpt, sol.solver.nrejct, sol.solver.nfailed,
-     sol.nfev, sol.njev, sol.nlu, sol.solver.nlusolve, sol.solver.nlusolve_errorest))
+     sol.nfev, sol.njev, sol.nlu, sol.solver._nlusolve, sol.solver._nlusolve_errorest))

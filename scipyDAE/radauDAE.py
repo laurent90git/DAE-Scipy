@@ -129,7 +129,7 @@ class RadauDAE(OdeSolver):
     The implementation follows [1]_. The error is controlled with a
     third-order accurate embedded formula. A cubic polynomial which satisfies
     the collocation conditions is used for the dense output.
-    Specific treatment of differential-algebraic systems follows [3]_.
+    Specific treatment of systems of differential-algebraic equations (DAEs) follows [3]_.
 
     Parameters
     ----------
@@ -196,7 +196,20 @@ class RadauDAE(OdeSolver):
         element in the Jacobian is always zero. If None (default), the Jacobian
         is assumed to be dense.
     vectorized : bool, optional
-        Whether `fun` is implemented in a vectorized fashion. Default is False.
+        Whether `fun` can be called in a vectorized fashion. Default is False.
+
+        If ``vectorized`` is False, `fun` will always be called with ``y`` of
+        shape ``(n,)``, where ``n = len(y0)``.
+
+        If ``vectorized`` is True, `fun` may be called with ``y`` of shape
+        ``(n, k)``, where ``k`` is an integer. In this case, `fun` must behave
+        such that ``fun(t, y)[:, i] == fun(t, y[:, i])`` (i.e. each column of
+        the returned array is the time derivative of the state corresponding
+        with a column of ``y``).
+
+        Setting ``vectorized=True`` allows for faster finite difference
+        approximation of the Jacobian by this method, but may result in slower
+        execution overall in some circumstances (e.g. small ``len(y0)``).
     mass : {None, array_like, sparse_matrix}, optional
         Defined the constant mass matrix of the system, with shape (n,n).
         It may be singular, thus defining a problem of the differential-
@@ -233,6 +246,9 @@ class RadauDAE(OdeSolver):
         Number of evaluations of the Jacobian.
     nlu : int
         Number of LU decompositions.
+    nlusolve: int
+        Number of linear systems solved with the LU decompositions.
+      
 
     References
     ----------
@@ -251,7 +267,7 @@ class RadauDAE(OdeSolver):
                  vectorized=False, first_step=None, mass_matrix=None, bPrint=False,
                  newton_tol=None, constant_dt=False, bPrintProgress=False,
                  max_newton_ite=6, min_factor=0.2, max_factor=10, max_bad_ite=None,
-                 var_index=None, scale_residuals=False, scale_newton_norm=False,
+                 var_index=None, scale_residuals=True, scale_newton_norm=True,
                  scale_error=True, zero_algebraic_error=False, bDebug=False,
                  jacobianRecomputeFactor=1e-3,
                  bAlwaysApply2ndEstimate=True, bUsePredictiveController=True,
@@ -300,9 +316,10 @@ class RadauDAE(OdeSolver):
         self.h_abs_old = None
         self.error_norm_old = None
 
+        self.newton_tol = max(10 * EPS / rtol, min(0.03, rtol ** 0.5)) # Convergence tolerance for the Newton iterations (see 
         # newton tolerance (relative to the integration error tolerance)
         if newton_tol is None:
-            self.newton_tol = max(10 * EPS / rtol, min(0.03, rtol ** 0.5))
+            self.newton_tol = max(10 * EPS / rtol, min(0.03, rtol ** 0.5))  # Convergence tolerance for the Newton iterations (see [1] and the original Radau5 Fortran code)
         else:
             self.newton_tol = newton_tol
         print(f'Setting Newton tol to {self.newton_tol:.3e}')
@@ -327,8 +344,8 @@ class RadauDAE(OdeSolver):
             return zzzjac(t,y,f)
           self.jac = debugJacprint
 
-        self.nlusolve=0
-        self.nlusolve_errorest = 0
+        self._nlusolve=0
+        self._nlusolve_errorest = 0
         self.nstep = 0
         self.naccpt = 0
         self.nfailed = 0
@@ -339,7 +356,7 @@ class RadauDAE(OdeSolver):
                 return splu(A)
 
             def solve_lu(LU, b):
-                self.nlusolve+=1
+                self._nlusolve+=1
                 return LU.solve(b)
 
             I = eye(self.n, format='csc')
@@ -349,7 +366,7 @@ class RadauDAE(OdeSolver):
                 return lu_factor(A, overwrite_a=True)
 
             def solve_lu(LU, b):
-                self.nlusolve+=1
+                self._nlusolve+=1
                 return lu_solve(LU, b, overwrite_b=True)
 
             I = np.identity(self.n)
@@ -377,7 +394,7 @@ class RadauDAE(OdeSolver):
             assert var_index.size == y0.size
             self.var_index = var_index
 
-        self.var_exp = self.var_index - 1
+        self.var_exp = self.var_index - 1 # for DAE-specific scalings
         self.var_exp[ self.var_exp < 0 ] = 0 # for differential components
 
         if not ( max_bad_ite is None ):
@@ -480,9 +497,8 @@ class RadauDAE(OdeSolver):
                     return np.asarray(jac(t, y), dtype=float)
 
             if J.shape != (self.n, self.n):
-                raise ValueError("`jac` is expected to have shape {}, but "
-                                 "actually has {}."
-                                 .format((self.n, self.n), J.shape))
+                raise ValueError(f"`jac` is expected to have shape {(self.n, self.n)},"
+                                 f" but actually has {J.shape}.")
         else:
             if issparse(jac):
                 J = csc_matrix(jac)
@@ -490,9 +506,8 @@ class RadauDAE(OdeSolver):
                 J = np.asarray(jac, dtype=float)
 
             if J.shape != (self.n, self.n):
-                raise ValueError("`jac` is expected to have shape {}, but "
-                                 "actually has {}."
-                                 .format((self.n, self.n), J.shape))
+                raise ValueError(f"`jac` is expected to have shape {(self.n, self.n)},"
+                                 f" but actually has {J.shape}.")
             jac_wrapped = None
 
         return jac_wrapped, J
@@ -524,7 +539,7 @@ class RadauDAE(OdeSolver):
 
         if abs(self.t_bound - (t + self.direction * h_abs)) < 1e-2*h_abs:
             # the next time step would be too small
-            # # --> we cut the remaining time in half
+            # hence, we cut the remaining time in half
             # if BPRINT:
             #     print('Reducing time step to avoid a last tiny step')
             # h_abs = abs(self.t_bound - t) / 2
@@ -592,7 +607,7 @@ class RadauDAE(OdeSolver):
                       if self.bReport: self._report(t=t,dt=h,code=CODE_FACTORISATION)
                       LU_real    = self.lu( self.hscale @ (MU_REAL    / h * self.mass_matrix - J) )
                       LU_complex = self.lu( self.hscale @ (MU_COMPLEX / h * self.mass_matrix - J) )
-                      self.nlu -= 1 # to match Fortran
+                      self.nlu -= 1 # to match original Fortran code
                   except ValueError as e:
                     # import pdb; pdb.set_trace()
                     return False, 'LU decomposition failed ({})'.format(e)
@@ -657,14 +672,19 @@ class RadauDAE(OdeSolver):
                 ZE = Z.T.dot(E) / h
                 err_scale = atol + np.maximum(np.abs(y), np.abs(y_new)) * rtol
                 if self.scale_error:
+                    # correct for the overestimation of the error on
+                    # algebraic variables, ideally multiply their errors by
+                    # (h ** index), see [3]
                     err_scale = err_scale / (h**self.var_exp) # scale for algebraic variables
 
                 # see [1], chapter IV.8, page 127
                 error = self.solve_lu(LU_real, f + self.mass_matrix.dot(ZE))
                 errors1 = error / err_scale
-                self.nlusolve_errorest += 1
-                self.nlusolve -= 1
+                self._nlusolve_errorest += 1
+                self._nlusolve -= 1
                 if self.zero_algebraic_error:
+                    # we exclude the algebraic components, otherwise
+                    # they artificially lower the error norm
                     error[ self.index_algebraic_vars ] = 0.
                     error_norm = np.linalg.norm(error / err_scale) / (n - self.nvars_algebraic) ** 0.5
                 else:
@@ -678,9 +698,10 @@ class RadauDAE(OdeSolver):
                       print('\t rejected')
                     error = self.solve_lu(LU_real, self.fun(t, y + error) + self.mass_matrix.dot(ZE)) # error is not corrected for algebraic variables
                     errors2 = error / err_scale
-                    self.nlusolve_errorest += 1
-                    self.nlusolve -= 1
+                    self._nlusolve_errorest += 1
+                    self._nlusolve -= 1
                     if self.zero_algebraic_error:
+                        # again, we exclude the algebraic components
                         error[ self.index_algebraic_vars ] = 0.
                         error_norm = np.linalg.norm(error / err_scale) / (n - self.nvars_algebraic) ** 0.5
                     else:
@@ -751,7 +772,6 @@ class RadauDAE(OdeSolver):
         self.t = t_new
         self.y = y_new
         self.f = f_new
-
 
         self.Z = Z
 
@@ -857,7 +877,7 @@ class RadauDAE(OdeSolver):
             # compute Newton increment
             dW_real    = self.solve_lu(LU_real,    f_real)
             dW_complex = self.solve_lu(LU_complex, f_complex)
-            self.nlusolve -= 1 # to match the original Fortran code
+            self._nlusolve -= 1 # to match the original Fortran code
 
             dW[0] = dW_real
             dW[1] = dW_complex.real
@@ -891,9 +911,9 @@ class RadauDAE(OdeSolver):
                 if rate >= 1: # Newton loop diverges
                     if BPRINT:
                         print('\t\tNewton loop diverges')
-                    if rate<100:
+                    if rate<100: # divergence is not too extreme yet
                         if nbad_iter<self.NMAX_BAD:
-                            # we accept a few number of bad iterations, which may be necessary
+                            # we accept a few number of bad iterations, which may be necessary for certain higer-index DAEs
                             if BPRINT:
                                 print('\t\tbad iteration (rate>1)')
                             nbad_iter+=1
@@ -952,7 +972,7 @@ class RadauDenseOutput(DenseOutput):
         else:
             p = np.tile(x, (self.order + 1, 1))
             p = np.cumprod(p, axis=0)
-        # Here we don't multiply by h, not a mistake, because we use the dimensionless time x
+        # Here we don't multiply by h, not a mistake, because we rely on a dimensionless time
         y = np.dot(self.Q, p)
         if y.ndim == 2:
             y += self.y_old[:, None]
